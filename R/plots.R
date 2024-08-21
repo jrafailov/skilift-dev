@@ -1,5 +1,6 @@
 library(VariantAnnotation)
-
+library(skidb)
+library(Biostrings)
 
 internal_settings_path = system.file("extdata", "test_data", "settings.json", package = "Skilift")
 
@@ -491,23 +492,33 @@ create_somatic_json = function(plot_metadata, datadir, settings = internal_setti
             mutations.dt = mutations.dt[!is.na(get(yfield)),]
             mutations.dt[start == end, end := end +1]
             mutations.dt[, strand := NULL]
-            mutations.dt[variant.p != "", annotation := paste0(
-                "Type: ", annotation,
-                "; Gene: ", gene,
-                "; Variant: ", variant.c,
-                "; Protein_variant: ", variant.p,
-                "; VAF: ", vaf
-            )]
-            mutations.dt[variant.p == "", annotation := paste0(
-                "Type: ",
-                annotation,
-                "; Gene: ",
-                gene,
-                "; Variant: ",
-                variant.c,
-                "; VAF: ",
-                vaf
-            )]
+            # create an empty mutation annotation string, then add attributes to it if they exist
+            mut_ann <- ""
+            if ("annotation" %in% colnames(mutations.dt)) {
+                mut_ann <- paste0("Type: ", mutations.dt$annotation, "; ")
+            }
+            if ("gene" %in% colnames(mutations.dt)) {
+                mut_ann <- paste0(mut_ann, "Gene: ", mutations.dt$gene, "; ")
+            }
+            if ("variant.c" %in% colnames(mutations.dt)) {
+                mut_ann <- paste0(mut_ann, "Variant: ", mutations.dt$variant.c, "; ")
+            }
+            if ("variant.p" %in% colnames(mutations.dt)) {
+                mut_ann <- paste0(mut_ann, "Protein_variant: ", mutations.dt$variant.p, "; ")
+            }
+            if ("vaf" %in% colnames(mutations.dt)) {
+                mut_ann <- paste0(mut_ann, "VAF: ", mutations.dt$vaf, "; ")
+            }
+            if ("ref" %in% colnames(mutations.dt)) {
+                mut_ann <- paste0(mut_ann, "Ref_count: ", mutations.dt$ref, "; ")
+            }
+            if ("alt" %in% colnames(mutations.dt)) {
+                mut_ann <- paste0(mut_ann, "Alt_count: ", mutations.dt$alt, "; ")
+            }
+            if ("FILTER" %in% colnames(mutations.dt)) {
+                mut_ann <- paste0(mut_ann, "Filter: ", mutations.dt$FILTER, "; ")
+            }
+            mutations.dt[, annotation := mut_ann]
             dt2json_mut(
                 dt = mutations.dt,
                 ref = plot_metadata$ref,
@@ -998,6 +1009,7 @@ oncotable = function(tumors, gencode = 'http://mskilab.com/fishHook/hg19/gencode
         fus[, vartype := ifelse(in.frame == TRUE, 'fusion', 'outframe_fusion')] # annotate out of frame fusions
         fus = fus[, .(gene = strsplit(genes, ',') %>% unlist, vartype = rep(vartype, sapply(strsplit(genes, ','), length)))][, id := x][, track := 'variants'][, type := vartype][, source := 'fusions']
         out = rbind(out, fus, fill = TRUE, use.names = TRUE)
+        print(fus)
       }
     } 
     else ## signal missing result
