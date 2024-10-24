@@ -1366,6 +1366,9 @@ filtered_events_json = function(
     ##Load details from oncotable
     ot = readRDS(oncotable)
     # add a fusion_gene_coords column of NAs if no fusions
+    if (!"fusion_genes" %in% colnames(ot)) {
+        ot[, fusion_genes := NA]
+    }
     if (!"fusion_gene_coords" %in% colnames(ot)) {
         ot[, fusion_gene_coords := NA]
     }
