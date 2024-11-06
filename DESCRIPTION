@@ -27,6 +27,7 @@ Imports:
     gUtils,
     VariantAnnotation,
     Biostrings,
+    IRanges,
     skidb,
     skitools,
     magrittr,
