@@ -17,7 +17,7 @@ parse_oncokb_tier(
 }
 \description{
 Helper function to parse oncokb outputs
-levels of evidence and assign tier. 
+levels of evidence and assign tier.
 Tiering is simply:
 1 = Clinically Actionable:
 Therapeutic sensitivity, resistance,
