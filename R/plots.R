@@ -1,11 +1,10 @@
 #' @importFrom gUtils dt2gr
 #' @importFrom magrittr `%>%`
 #' @useDynLib Skilift, .registration=TRUE
-
-library(VariantAnnotation)
-library(skidb)
-library(Biostrings)
-library(skitools)
+#' @import VariantAnnotation
+#' @import skidb
+#' @import Biostrings
+#' @import skitools
 
 internal_settings_path <- system.file("extdata", "test_data", "settings.json", package = "Skilift")
 
@@ -1093,9 +1092,9 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
 }
 
 #' Parse oncokb outputs and tier
-#' 
+#'
 #' Helper function to parse oncokb outputs
-#' levels of evidence and assign tier. 
+#' levels of evidence and assign tier.
 #' Tiering is simply:
 #' 1 = Clinically Actionable:
 #' Therapeutic sensitivity, resistance,
@@ -1106,45 +1105,44 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
 #' does not have therapeutic, diagnostic, or prognostic effect
 #' validated at FDA level, but is oncogenic.
 #' 3 = All others (VUS)
-#' 
+#'
 #' @param oncokb data.table object holding oncokb outputs
 #' @author Kevin Hadi
-parse_oncokb_tier = function(
-    oncokb, 
-    tx_cols = c("LEVEL_1", "LEVEL_2"), 
+parse_oncokb_tier <- function(
+    oncokb,
+    tx_cols = c("LEVEL_1", "LEVEL_2"),
     rx_cols = c("LEVEL_R1"),
     dx_cols = c("LEVEL_Dx1"),
-    px_cols = c("LEVEL_Px1")
-) {
-    .concat_string = function(oncokb, cols) {
-        out_string = lapply(base::subset(oncokb, select = cols), function(y) (strsplit(y, ",")))
-        concat_out = IRanges::CharacterList(Reduce(concat_vectors, out_string))
-        concat_out = S4Vectors::unique(concat_out)
-        concat_out = concat_out[!is.na(concat_out)]
-        concat_out[S4Vectors::elementNROWS(concat_out) == 0] = NA_character_
-        concat_out = stringi::stri_c_list(as.list(concat_out), sep = ",")
+    px_cols = c("LEVEL_Px1")) {
+    .concat_string <- function(oncokb, cols) {
+        out_string <- lapply(base::subset(oncokb, select = cols), function(y) (strsplit(y, ",")))
+        concat_out <- IRanges::CharacterList(Reduce(concat_vectors, out_string))
+        concat_out <- S4Vectors::unique(concat_out)
+        concat_out <- concat_out[!is.na(concat_out)]
+        concat_out[S4Vectors::elementNROWS(concat_out) == 0] <- NA_character_
+        concat_out <- stringi::stri_c_list(as.list(concat_out), sep = ",")
         return(concat_out)
     }
-    is_actionable = logical(NROW(oncokb))
+    is_actionable <- logical(NROW(oncokb))
     for (col in c(tx_cols, rx_cols, dx_cols, px_cols)) {
-        oncokb[[col]] = as.character(oncokb[[col]])
-        is_actionable = is_actionable | (!is.na(oncokb[[col]]) & base::nzchar(oncokb[[col]]))
+        oncokb[[col]] <- as.character(oncokb[[col]])
+        is_actionable <- is_actionable | (!is.na(oncokb[[col]]) & base::nzchar(oncokb[[col]]))
     }
-    oncokb$is_actionable = is_actionable
-    oncokb$is_oncogenic = oncokb$ONCOGENIC %in% c("Likely Oncogenic", "Oncogenic")
-    tier_factor = ifelse(
+    oncokb$is_actionable <- is_actionable
+    oncokb$is_oncogenic <- oncokb$ONCOGENIC %in% c("Likely Oncogenic", "Oncogenic")
+    tier_factor <- ifelse(
         oncokb$is_actionable, "Clinically Actionable",
         ifelse(oncokb$is_oncogenic, "Clinically Significant", "VUS")
     ) %>% factor(c("Clinically Actionable", "Clinically Significant", "VUS"))
 
-    oncokb$tier_factor = tier_factor
-    oncokb$tier = as.integer(tier_factor)
-    
-    oncokb$tx_string = .concat_string(oncokb, tx_cols)
-    oncokb$rx_string = .concat_string(oncokb, rx_cols)
-    oncokb$dx_string = .concat_string(oncokb, dx_cols)
-    oncokb$px_string = .concat_string(oncokb, px_cols)
-    
+    oncokb$tier_factor <- tier_factor
+    oncokb$tier <- as.integer(tier_factor)
+
+    oncokb$tx_string <- .concat_string(oncokb, tx_cols)
+    oncokb$rx_string <- .concat_string(oncokb, rx_cols)
+    oncokb$dx_string <- .concat_string(oncokb, dx_cols)
+    oncokb$px_string <- .concat_string(oncokb, px_cols)
+
     return(oncokb)
 }
 
@@ -1193,7 +1191,6 @@ parse_oncokb_tier = function(
 #' @author Marcin Imielinski
 #' @export
 oncotable <- function(tumors, gencode = "http://mskilab.com/fishHook/hg19/gencode.v19.genes.gtf", verbose = TRUE, amp.thresh = 4, filter = "PASS", del.thresh = 0.5, mc.cores = 1) {
-
     gencode <- process_gencode(gencode)
 
     if ("type" %in% names(mcols(gencode))) {
@@ -1204,7 +1201,7 @@ oncotable <- function(tumors, gencode = "http://mskilab.com/fishHook/hg19/gencod
     }
 
     .oncotable <- function(dat, x = dat[[key(dat)]][1], pge, verbose = TRUE, amp.thresh = 2, del.thresh = 0.5, filter = "PASS") {
-        snpeff_ontology = readRDS(system.file("extdata/data", "snpeff_ontology.rds", package = "Skilift"))
+        snpeff_ontology <- readRDS(system.file("extdata/data", "snpeff_ontology.rds", package = "Skilift"))
         out <- data.table()
 
         ## collect gene fusions
@@ -1292,7 +1289,7 @@ oncotable <- function(tumors, gencode = "http://mskilab.com/fishHook/hg19/gencod
 
         if (!is.null(dat$oncokb_cna) && file.exists(dat[x, oncokb_cna])) {
             oncokb_cna <- data.table::fread(dat[x, oncokb_cna])
-            concat_out <- data.table(id = x,  source = "oncokb_cna")
+            concat_out <- data.table(id = x, source = "oncokb_cna")
 
             if (NROW(oncokb) > 0) {
                 oncokb_cna$snpeff_ontology <- snpeff_ontology$short[match(oncokb$Consequence, snpeff_ontology$eff)]
@@ -1304,30 +1301,30 @@ oncotable <- function(tumors, gencode = "http://mskilab.com/fishHook/hg19/gencod
                 # Oncogenic/Likely Oncogenic = "Relevant"
                 # Rest = "VUS"
                 # TODO: Tumor Type Specific annotations - filter with annotations.tsv from OncoKB
-                oncokb_cna = parse_oncokb_tier(
-                    oncokb_cna, 
-                    tx_cols = c("LEVEL_1", "LEVEL_2"), 
+                oncokb_cna <- parse_oncokb_tier(
+                    oncokb_cna,
+                    tx_cols = c("LEVEL_1", "LEVEL_2"),
                     rx_cols = c("LEVEL_R1"),
                     dx_cols = c("LEVEL_Dx1"),
                     px_cols = c("LEVEL_Px1")
                 )
 
                 # scna[, .(id = x, value = min_cn, type, track, gene = gene_name)]
-                concat_out = oncokb_cna[, .(
-                        id = x, 
-                        gene = Hugo_Symbol,
-                        value = min_cn,
-                        type = ifelse(ALTERATION == "Amplification", "amp", ifelse(ALTERATION == "Deletion", "homdel", NA_character_)),
-                        tier = tier,
-                        tier_description = tier_factor,
-                        therapeutics = tx_string, # comes from parse_oncokb_tier
-                        resistances = rx_string,
-                        diagnoses = dx_string,
-                        prognoses = px_string,
-                        track = "scna"
+                concat_out <- oncokb_cna[, .(
+                    id = x,
+                    gene = Hugo_Symbol,
+                    value = min_cn,
+                    type = ifelse(ALTERATION == "Amplification", "amp", ifelse(ALTERATION == "Deletion", "homdel", NA_character_)),
+                    tier = tier,
+                    tier_description = tier_factor,
+                    therapeutics = tx_string, # comes from parse_oncokb_tier
+                    resistances = rx_string,
+                    diagnoses = dx_string,
+                    prognoses = px_string,
+                    track = "scna"
                 )]
             }
-            out = rbind(out, concat_out, fill = TRUE, use.names = TRUE)
+            out <- rbind(out, concat_out, fill = TRUE, use.names = TRUE)
         }
 
 
@@ -1383,7 +1380,7 @@ oncotable <- function(tumors, gencode = "http://mskilab.com/fishHook/hg19/gencod
 
         if (!is.null(dat$oncokb_maf) && file.exists(dat[x, oncokb_maf])) {
             oncokb <- data.table::fread(dat[x, oncokb_maf])
-            concat_out <- data.table(id = x,  source = "oncokb_maf")
+            concat_out <- data.table(id = x, source = "oncokb_maf")
 
             if (NROW(oncokb) > 0) {
                 oncokb$snpeff_ontology <- snpeff_ontology$short[match(oncokb$Consequence, snpeff_ontology$eff)]
@@ -1395,38 +1392,38 @@ oncotable <- function(tumors, gencode = "http://mskilab.com/fishHook/hg19/gencod
                 # Oncogenic/Likely Oncogenic = "Relevant"
                 # Rest = "VUS"
                 # TODO: Tumor Type Specific annotations - filter with annotations.tsv from OncoKB
-                oncokb = parse_oncokb_tier(
-                    oncokb, 
-                    tx_cols = c("LEVEL_1", "LEVEL_2"), 
+                oncokb <- parse_oncokb_tier(
+                    oncokb,
+                    tx_cols = c("LEVEL_1", "LEVEL_2"),
                     rx_cols = c("LEVEL_R1"),
                     dx_cols = c("LEVEL_Dx1"),
                     px_cols = c("LEVEL_Px1")
                 )
-                concat_out = oncokb[, .(
-                        id = x, 
-                        gene = Hugo_Symbol, 
-                        variant.g = paste("g.",  Start_Position, "-", End_Position, sep = ""), 
-                        variant.c = HGVSc,
-                        variant.p = HGVSp,
-                        annotation = Consequence,
-                        type = snpeff_ontology,
-                        tier = tier,
-                        tier_description = tier_factor,
-                        therapeutics = tx_string, # comes from parse_oncokb_tier
-                        resistances = rx_string,
-                        diagnoses = dx_string,
-                        prognoses = px_string,
-                        distance = NA_integer_,
-                        major.count, 
-                        minor.count, 
-                        major_snv_copies, 
-                        minor_snv_copies,
-                        total_copies, 
-                        VAF,
-                        track = "variants"
+                concat_out <- oncokb[, .(
+                    id = x,
+                    gene = Hugo_Symbol,
+                    variant.g = paste("g.", Start_Position, "-", End_Position, sep = ""),
+                    variant.c = HGVSc,
+                    variant.p = HGVSp,
+                    annotation = Consequence,
+                    type = snpeff_ontology,
+                    tier = tier,
+                    tier_description = tier_factor,
+                    therapeutics = tx_string, # comes from parse_oncokb_tier
+                    resistances = rx_string,
+                    diagnoses = dx_string,
+                    prognoses = px_string,
+                    distance = NA_integer_,
+                    major.count,
+                    minor.count,
+                    major_snv_copies,
+                    minor_snv_copies,
+                    total_copies,
+                    VAF,
+                    track = "variants"
                 )]
             }
-            out = rbind(out, concat_out, fill = TRUE, use.names = TRUE)
+            out <- rbind(out, concat_out, fill = TRUE, use.names = TRUE)
         }
 
         if (verbose) {
