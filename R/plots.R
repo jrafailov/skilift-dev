@@ -1341,6 +1341,8 @@ oncotable <- function(tumors, gencode = "http://mskilab.com/fishHook/hg19/gencod
         }
 
         ## collect gene mutations
+        keepeff <- c("trunc", "cnadel", "cnadup", "complexsv", "splice", "inframe_indel", "fusion", "missense", "promoter", "regulatory", "mir")
+
         if (!is.null(dat$annotated_bcf) && file.exists(dat[x, annotated_bcf])) {
             if (verbose) {
                 message("pulling $annotated_bcf for ", x, " using FILTER=", filter)
@@ -1361,7 +1363,6 @@ oncotable <- function(tumors, gencode = "http://mskilab.com/fishHook/hg19/gencod
                 nrow()
             mut.density <- data.table(id = x, value = c(nmut, nmut / genome.size), type = c("count", "density"), track = "tmb", source = "annotated_bcf")
             out <- rbind(out, mut.density, fill = TRUE, use.names = TRUE)
-            keepeff <- c("trunc", "cnadel", "cnadup", "complexsv", "splice", "inframe_indel", "fusion", "missense", "promoter", "regulatory", "mir")
             bcf <- bcf[bcf$short %in% keepeff]
             if (verbose) {
                 message(length(bcf), " variants pass keepeff")
@@ -1392,6 +1393,7 @@ oncotable <- function(tumors, gencode = "http://mskilab.com/fishHook/hg19/gencod
                 # Oncogenic/Likely Oncogenic = "Relevant"
                 # Rest = "VUS"
                 # TODO: Tumor Type Specific annotations - filter with annotations.tsv from OncoKB
+                oncokb <- oncokb[oncokb$snpeff_ontology %in% keepeff]
                 oncokb <- parse_oncokb_tier(
                     oncokb,
                     tx_cols = c("LEVEL_1", "LEVEL_2"),
