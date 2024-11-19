@@ -357,7 +357,7 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, verbose = TRUE) {
 
     if (!NROW(non_silent_fusions) > 0) return(out)
 
-    genes = strsplit(non_silent_fusions$FUSIONS, "-")
+    genes = strsplit(non_silent_fusions$FUSION, "-")
     genes_matrix = do.call(rbind, genes)
     ixA = match(genes_matrix[,1], pge$gene_name)
     ixB = match(genes_matrix[,2], pge$gene_name)
