@@ -365,7 +365,7 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, verbose = TRUE) {
     coordB = gUtils::gr.string(pge[ixB])
     non_silent_fusions$fusion_gene_coords = paste(coordA, coordB, sep = ",")
     out = non_silent_fusions[, .(
-            gene = HUGO_SYMBOL,
+            gene = Hugo_Symbol,
             role = Role,
             value = min_cn,
             vartype,
