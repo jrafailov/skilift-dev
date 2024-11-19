@@ -315,6 +315,9 @@ collect_oncokb_cna <- function(oncokb_cna, verbose = TRUE) {
             diagnoses = dx_string,
             prognoses = px_string,
             effect = MUTATION_EFFECT,
+            gene_summary = GENE_SUMMARY,
+            variant_summary = VARIANT_SUMMARY,
+            mutation_effect_description = MUTATION_EFFECT_DESCRIPTION,
             track = "scna",
             source = "oncokb_cna"
     )])
@@ -373,6 +376,9 @@ collect_oncokb_fusions <- function(oncokb_fusions, pge, verbose = TRUE) {
             diagnoses = dx_string,
             prognoses = px_string,
             effect = MUTATION_EFFECT,
+            gene_summary = GENE_SUMMARY,
+            variant_summary = VARIANT_SUMMARY,
+            mutation_effect_description = MUTATION_EFFECT_DESCRIPTION,
             fusion_gene_coords,
             track = "variants",
             source = "oncokb_fusions"
@@ -478,6 +484,9 @@ collect_oncokb <- function(oncokb_maf, verbose = TRUE) {
             prognoses = px_string,
             distance = NA_integer_,
             effect = MUTATION_EFFECT,
+            gene_summary = GENE_SUMMARY,
+            variant_summary = VARIANT_SUMMARY,
+            mutation_effect_description = MUTATION_EFFECT_DESCRIPTION,
             major_count = major.count, 
             minor_count = minor.count, 
             major_snv_copies, 
