@@ -772,8 +772,8 @@ create_filtered_events <- function(
     snvs <- ot[grepl("frameshift|missense|stop|disruptive", annotation, perl = TRUE)]
     snvs <- snvs[order(is.na(tier)), ]
     snvs <- snvs[!duplicated(variant.p), ]
-    homdels <- ot[type == "homdel"]
-    amps <- ot[type == "amp"]
+    homdels <- ot[type == "homdel"][, vartype := "HOMDEL"][, type := "SCNA"]
+  	amps <- ot[type == "amp"][, vartype := "AMP"][, type := "SCNA"]
     fusions <- ot[type == "fusion"]
     possible_drivers <- rbind(snvs, homdels, amps, fusions)
     filtered_events_columns <- c("gene", "fusion_genes", "id", "vartype", "type", "variant.g", "variant.p", "gene_location", "fusion_gene_coords")
@@ -800,12 +800,13 @@ create_filtered_events <- function(
         "resistances" = "resistances",
         "diagnoses" = "diagnoses",
         "prognoses" = "prognoses",
-        "total_copies" = "dosage"
+        "total_copies" = "total_copies"
     )
     intersected_columns <- intersect(filtered_events_columns, names(res))
     setnames(res, old = intersected_columns, new = oncotable_col_to_filtered_events_col[intersected_columns])
 
-    res <- res %>% unique(., by = c("gene", "Variant"))
+  res <- res %>% unique(., by = c("gene", "vartype", "Variant"))
+  browser()
     if (nrow(res) > 0) {
         res[, seqnames := tstrsplit(Genome_Location, ":", fixed = TRUE, keep = 1)]
         res[, start := tstrsplit(Genome_Location, "-", fixed = TRUE, keep = 1)]
@@ -813,7 +814,7 @@ create_filtered_events <- function(
         res[, end := tstrsplit(Genome_Location, "-", fixed = TRUE, keep = 2)]
         res.mut <- res[!is.na(Variant), ]
         if (nrow(res.mut) > 0) {
-            res.mut[, Variant := gsub("p.", "", Variant)]
+            #res.mut[, Variant := gsub("p.", "", Variant)]
             res.mut[, vartype := "SNV"]
             res.mut[type=="trunc", vartype := "DEL"]
         }
@@ -821,10 +822,13 @@ create_filtered_events <- function(
         if (nrow(res.cn) > 0) {
             jab <- readRDS(jabba_gg)
             res.cn.gr <- GRanges(res.cn)
-            res.cn.gr <- gr.val(res.cn.gr, jab$nodes$gr, c("cn", "cn.low", "cn.high"))
+            res.cn.gr <- gr.val(res.cn.gr, jab$nodes$gr, c("cn", "cn.low", "cn.high"), na.rm = T)
             res.cn.dt <- as.data.table(res.cn.gr)
-            res.cn.dt[!is.na(cn) & !is.na(cn.low) & !is.na(cn.high), Variant := paste0("Total CN:", round(cn, digits = 3), "; CN Minor:", round(cn.low, digits = 3), "; CN Major:", round(cn.high, digits = 3))]
-            res.cn.dt[!is.na(cn) & is.na(cn.low) & is.na(cn.high), Variant := paste0("Total CN:", round(cn, digits = 3))]
+            res.cn.dt[, total_copies := cn]
+            res.cn.dt[, Variant := vartype]
+            #res.cn.dt[!is.na(cn) & !is.na(cn.low) & !is.na(cn.high),
+            #          Variant := paste0("Total CN:", round(cn, digits = 3), "; CN Minor:", round(cn.low, digits = 3), "; CN Major:", round(cn.high, digits = 3))]
+            #res.cn.dt[!is.na(cn) & is.na(cn.low) & is.na(cn.high), Variant := paste0("Total CN:", round(cn, digits = 3))]
             if (temp_fix) {
                 res.cn.dt <- res.cn.dt[!(type == "homdel" & cn != 0), ]
                 res.cn.dt <- res.cn.dt[!(type == "amp" & cn <= 2), ]
