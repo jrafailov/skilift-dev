@@ -735,17 +735,24 @@ lift_purple_sunrise_plot <- function(
                 bestGamma <- 2 * (1 - bestPurity) / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
                 bestBeta <- bestPloidy / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
 
+                range[, color := scales::col_numeric(
+                    palette = scico::scico(256, palette = "batlow"),
+                    domain = range(1 - score, na.rm = TRUE)
+                )(1 - score)]
+
                 # Write the processed data to JSON if save_data is TRUE
                 if (save_data) {
-                    write_json(range[, .(purity, ploidy, score, xmin, xmax, ymin, ymax)], out_file, pretty = TRUE)
+                    write_json(range[, .(purity, ploidy, score, xmin, xmax, ymin, ymax, color)], out_file, pretty = TRUE)
                 }
 
                 p <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE)
                 q <- create_beta_gamma_plot(range, bestBeta, bestGamma)
 
                 if (save_html) {
-                    p_html <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = FALSE)
-                    save_purple_sunrise_html(p_html, q, out_file_html)
+                    if (requireNamespace("Cairo", quietly = TRUE)) {
+                        p_html <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = FALSE)
+                        save_purple_sunrise_html(p_html, q, out_file_html)
+                    }
                 }
 
                 if (save_pngs) {
@@ -763,8 +770,8 @@ lift_purple_sunrise_plot <- function(
 create_purity_ploidy_plot <- function(purple_purity_range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE) {
     if (use_geom_rect) {
         p <- ggplot(purple_purity_range) +
-            geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = 1- score)) +
-            scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
+            geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = color)) +
+            #scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
             geom_point(aes(x = bestPloidy, y = bestPurity), color = "red", size = 5, shape = 4, stroke = 0.5) +
             geom_segment(aes(x = bestPloidy, xend = bestPloidy, y = minPurity - 0.005, yend = maxPurity + 0.005), color = "red", linetype = "dotted") +
             geom_segment(aes(x = minPloidy, xend = maxPloidy, y = bestPurity, yend = bestPurity), color = "red", linetype = "dotted") +
@@ -776,8 +783,8 @@ create_purity_ploidy_plot <- function(purple_purity_range, bestPloidy, bestPurit
             ylab("Purity")
         } else {
         p <- ggplot(purple_purity_range) +
-            geom_raster(aes(x = ploidy, y = purity, fill = 1- score)) +
-            scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
+            geom_raster(aes(x = ploidy, y = purity, fill = color)) +
+            #scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
             geom_point(aes(x = bestPloidy, y = bestPurity), color = "red", size = 5, shape = 4, stroke = 0.5) +
             geom_segment(aes(x = bestPloidy, xend = bestPloidy, y = minPurity - 0.005, yend = maxPurity + 0.005), color = "red", linetype = "dotted") +
             geom_segment(aes(x = minPloidy, xend = maxPloidy, y = bestPurity, yend = bestPurity), color = "red", linetype = "dotted") +
