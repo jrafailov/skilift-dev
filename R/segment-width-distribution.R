@@ -214,6 +214,7 @@ lift_allelic_pp_fit <- function(cohort,
                                 cores = 1,
                                 save_png = TRUE,
                                 save_data = TRUE, 
+                                binwidth = 1e4,
                                 file.name = "hetsnps_major_minor.png") {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
@@ -247,7 +248,7 @@ lift_allelic_pp_fit <- function(cohort,
                         hets.fname = row$het_pileups,
                         allele = TRUE,
                         scatter = TRUE,
-                        binwidth = 1e4,
+                        binwidth = binwidth,
                         save = FALSE,
                         field = "count",
                         verbose = T) 
@@ -1235,37 +1236,44 @@ pp_plot = function(jabba_rds = NULL,
 
   } else {
 
-    if (scatter) {
 
+    if (scatter) {
       dt = cbind(as.data.table(major.tiles)[, .(seqnames, start, end, major.cn = cn)],
                  as.data.table(minor.tiles)[, .(minor.cn = cn, jabba_cn = jabba_cn)])
       dt = dt[major.cn < maxval & minor.cn < maxval &
-              major.cn > minval & minor.cn > minval &
-              grepl("[0-9]", seqnames)==TRUE,]
+                major.cn > minval & minor.cn > minval &
+                grepl("[0-9]", seqnames)==TRUE,]
 
-    # Add a 'color' column with hex codes using ggplot2's default hue palette
-    dt[, color := scales::hue_pal()(length(unique(jabba_cn)))[match(jabba_cn, sort(unique(jabba_cn)))]]
 
-      pt = ggplot(dt, aes(x = major.cn, y = minor.cn, color = factor(jabba_cn))) +
-        geom_point(size = 2, alpha = 0.1) +
+      # Add a 'color' column with hex codes using Tableau10 color palette
+      tableau10 <- c("#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
+                   "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC")
+      dt[, color := { u <- sort(unique(jabba_cn));
+        setNames(tableau10[((seq_along(u) - 1) %% length(tableau10)) + 1], u)[as.character(jabba_cn)] }]
+      dt <- dt[seqnames %in% c(1:22, "X", "Y")]
+    
+    pt = ggplot(dt, aes(x = major.cn, y = minor.cn, group = jabba_cn, fill = color, color = color)) +
+        #stat_density_2d(geom = "polygon", alpha = 0.7, color = "white") +
+        geom_point(size = 1, alpha = 0.2) +
+        scale_fill_identity() +
         scale_x_continuous(breaks = 0:floor(maxval),
                            labels = as.character(0:floor(maxval)),
-                           sec.axis = sec_axis(trans = ~(. - eqn["intercept"])/eqn["slope"],
+                           sec.axis = sec_axis(~ (. - eqn["intercept"]) / eqn["slope"],
                                                name = paste("Major", field))) +
         scale_y_continuous(breaks = 0:floor(maxval),
                            labels = as.character(0:floor(maxval)),
-                           sec.axis = sec_axis(trans = ~(. - eqn["intercept"])/eqn["slope"],
+                           sec.axis = sec_axis(~ (. - eqn["intercept"]) / eqn["slope"],
                                                name = paste("Minor", field))) +
-        labs(x = "Major CN", y = "Minor CN", color = "JaBbA CN") +
+        labs(x = "Major CN", y = "Minor CN", fill = "Group Color", color = "Group Color") +
         theme_bw() +
         theme(legend.position = "none",
               axis.title = element_text(size = 20, family = "sans"),
               axis.text.x = element_text(size = 20, family = "sans"),
               axis.text.y = element_text(size = 14, family = "sans"))
-
-      pt = ggExtra::ggMarginal(pt, type = "histogram",
-                               xparams = list(bins = bins),
-                               yparams = list(bins = bins))
+              
+    pt = ggExtra::ggMarginal(pt, type = "histogram",
+                             xparams = list(bins = bins),
+                             yparams = list(bins = bins))
       
     } else {
 
