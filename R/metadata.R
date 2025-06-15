@@ -902,6 +902,111 @@ compute_signature_averages <- function(
     }
 }
 
+#' @name compute_signature_averages
+#' @title Compute Signature Averages
+#' @description
+#' Computes signature averages from various signature files
+#'
+#' @param sig_file Path to signature file
+#' @param sample Sample or pair name needed to subset to the correct sample
+#' @param is_indel Boolean indicating if processing indel signatures
+#' @param is_deconstruct_sigs Boolean indicating if using deconstructSigs format
+#' @return List of signature averages
+compute_cosine_similarity <- function(
+    metadata,
+    probabilities,
+    matrix_file,
+    is_indel = FALSE,
+    is_deconstruct_sigs = FALSE,
+    reference = "hg19"
+) {
+
+    #browser()
+
+    if (reference == "hg19") {
+        if (is_indel) {
+            sig_file <- system.file("extdata", "/data/COSMIC_v3.4_ID_GRCh37.txt", package = "Skilift")
+        } else {
+            sig_file <- system.file("extdata", "/data/COSMIC_v3.4_SBS_GRCh37.txt", package = "Skilift")
+        }
+    } else {
+        if (is_indel) {
+            sig_file <- system.file("extdata", "/data/COSMIC_v3.4_ID_GRCh38.txt", package = "Skilift")
+        } else {
+            sig_file <- system.file("extdata", "/data/COSMIC_v3.4_SBS_GRCh38.txt", package = "Skilift")
+        }
+    }
+    
+    weight_reads <- fread(sig_file)
+    expected_reads <- copy(weight_reads)
+
+    # Set the first row as rownames
+    row_names <- expected_reads[[1]]
+    # Remove the first column
+    expected_reads <- expected_reads[,2:ncol(expected_reads)]
+    rownames(expected_reads) <- row_names
+    
+    ### EXPECTED SIGNATURES ###
+    activities <- if(is_indel) {
+        metadata$sigprofiler_indel_count %>% unlist()
+    } else {
+        metadata$sigprofiler_sbs_count %>% unlist()
+    }
+    matching_signatures <- intersect(names(activities), colnames(expected_reads))
+    
+    if(length(matching_signatures) == 0) {
+        warning("No matching signature names found between expected_reads and activities")
+        return(NULL)
+    }
+    
+    weighted_expected <- as.matrix(expected_reads)
+    
+    for(sig in matching_signatures) {
+        weighted_expected[, sig] <- weighted_expected[, sig] * activities[[sig]]
+    }
+
+    ### ATTRIBUTED SIGNATURES ###     
+    probabilities = fread(probabilities)
+    prob.matrix <- as.matrix(probabilities[, 3:ncol(probabilities)])
+
+    matrix_file <- fread(matrix_file)
+    if (ncol(matrix_file) < 2) {
+        stop("matrix_file must have at least two columns")
+    }
+    multiplier <- as.numeric(matrix_file[[2]])
+    if (length(multiplier) != nrow(prob.matrix)) {
+        stop("Length of multiplier vector must match the number of rows in prob.matrix")
+    }
+    
+    ### COMPUING COSINE SIMILARITY ###
+    weighted_prob_matrix <- prob.matrix
+    for (i in 1:ncol(prob.matrix)) {
+        weighted_prob_matrix[, i] <- prob.matrix[, i] * multiplier
+    }
+
+    cosine_similarities <- numeric(ncol(weighted_prob_matrix))
+    names(cosine_similarities) <- colnames(weighted_prob_matrix)
+    
+    for (i in 1:ncol(weighted_prob_matrix)) {
+        vec_a <- weighted_prob_matrix[, i]
+        vec_b <- weighted_expected[, i]
+        min_length <- min(length(vec_a), length(vec_b))
+        vec_a <- vec_a[1:min_length]
+        vec_b <- vec_b[1:min_length]
+        cosine_similarity <- sum(vec_a * vec_b) / (sqrt(sum(vec_a^2)) * sqrt(sum(vec_b^2)))
+        cosine_similarities[i] <- cosine_similarity
+    }
+
+    # Replace NaN values with 0
+    cosine_similarities[is.nan(cosine_similarities)] <- 0
+
+    # Return the weighted matrix for further analysis
+    return(list(cosine_similarities = cosine_similarities, 
+                weighted_expected = weighted_expected, 
+                weighted_prob_matrix = weighted_prob_matrix))
+
+}
+
 #' @name add_signatures
 #' @title Add Signatures
 #' @description
@@ -910,15 +1015,24 @@ compute_signature_averages <- function(
 #' @param metadata A data.table containing metadata.
 #' @param signatures_pair_name The name of the signature pair.
 #' @param activities_sbs_signatures Activities of SBS signatures.
+#' @param decomposed_sbs_signatures Probabilities of SBS signatures.
+#' @param matrix_sbs_signatures Matrix of SBS signatures.
 #' @param activities_indel_signatures Activities of indel signatures.
+#' @param decomposed_indel_signatures Matrix of indel signatures.
+#' @param matrix_indel_signatures Matrix of indel signatures.
 #' @param deconstructsigs_sbs_signatures DeconstructSigs SBS signatures.
 #' @return Updated metadata with mutational signatures added.
 add_signatures <- function(
     metadata,
     activities_sbs_signatures,
+    decomposed_sbs_signatures,
+    matrix_sbs_signatures,
     activities_indel_signatures,
+    decomposed_indel_signatures,
+    matrix_indel_signatures,
     deconstructsigs_sbs_signatures
 ) {
+
     # Initialize list columns with proper length
     n <- nrow(metadata)
     metadata[, `:=`(
@@ -931,7 +1045,10 @@ add_signatures <- function(
         signatures = list(list())
     )]
 
+    #browser()
+
     if (!is.null(activities_sbs_signatures)) {
+        
         signatures <- compute_signature_averages(
             sig_file = activities_sbs_signatures,
             is_indel = FALSE,
@@ -941,6 +1058,19 @@ add_signatures <- function(
         metadata$sigprofiler_sbs_fraction <- list(as.list(signatures[["sbs_fraction"]]))
         metadata$sigprofiler_sbs_count <- list(as.list(signatures[["sbs_count"]]))
         metadata$signatures <- list(as.list(signatures[["sbs_fraction"]]))
+        
+        if (!is.null(decomposed_sbs_signatures) && !is.null(matrix_sbs_signatures)) {
+            cosine_similarities <- compute_cosine_similarity(
+                metadata = metadata,
+                probabilities = decomposed_sbs_signatures,
+                matrix_file = matrix_sbs_signatures,
+                is_indel = FALSE,
+                is_deconstruct_sigs = FALSE #' TODO ADD FUNCTIONALITY FOR different references
+            )
+
+            metadata$sigprofiler_sbs_cosine_similarity <- list(as.list(cosine_similarities[["cosine_similarities"]]))
+        }
+
     }
 
     if (!is.null(activities_indel_signatures)) {
@@ -952,6 +1082,21 @@ add_signatures <- function(
         metadata$deletionInsertion <- list(as.list(deletionInsertion[["indel_fraction"]]))
         metadata$sigprofiler_indel_fraction <- list(as.list(deletionInsertion[["indel_fraction"]]))
         metadata$sigprofiler_indel_count <- list(as.list(deletionInsertion[["indel_count"]]))
+
+        if(!is.null(decomposed_indel_signatures) && !is.null(matrix_indel_signatures)) {
+            cosine_similarities <- compute_cosine_similarity(
+                metadata = metadata,
+                probabilities = decomposed_indel_signatures,
+                matrix_file = matrix_indel_signatures,
+                is_indel = TRUE,
+                is_deconstruct_sigs = FALSE #' TODO ADD FUNCTIONALITY FOR different references
+            )
+
+             metadata$sigprofiler_indel_cosine_similarity <- list(as.list(cosine_similarities[["cosine_similarities"]]))
+
+        }
+
+
     }
 
     if (!is.null(deconstructsigs_sbs_signatures)) {
@@ -1072,6 +1217,10 @@ add_msisensor_score <- function(metadata, msisensorpro) {
 #' @param signatures_pair_name The name of the signature pair.
 #' @param matrix_indel_signatures Matrix of indel signatures.
 #' @param matrix_sbs_signatures Matrix of SBS signatures.
+#' @param decomposed_sbs_signatures Decomposed SBS signatures.
+#' @param decomposed_indel_signatures Decomposed indel signatures.
+#' @param deconstructsigs_sbs_signatures DeconstructSigs SBS signatures.
+#' @param activities_indel_signatures Activities of indel signatures.
 #' @param activities_sbs_signatures Activities of SBS signatures.
 #' @param hrdetect HRDetect scores.
 #' @param onenesstwoness Oneness and twoness scores.
@@ -1102,6 +1251,10 @@ create_metadata <- function(
     activities_indel_signatures = NULL,
     deconstructsigs_sbs_signatures = NULL,
     activities_sbs_signatures = NULL,
+    decomposed_sbs_signatures = NULL,
+    decomposed_indel_signatures = NULL,
+    matrix_indel_signatures = NULL,
+    matrix_sbs_signatures = NULL,
     hrdetect = NULL,
     onenesstwoness = NULL,
     msisensorpro = NULL,
@@ -1116,7 +1269,7 @@ create_metadata <- function(
     # Initialize metadata with all possible columns
     metadata <- initialize_metadata_columns(pair)
     # change NA to NULL
-    fix_entries = c("tumor_type", "disease", "primary_site", "inferred_sex", "jabba_gg", "events", "somatic_snvs", "germline_snvs", "tumor_coverage", "estimate_library_complexity", "alignment_summary_metrics", "insert_size_metrics", "wgs_metrics", "het_pileups", "activities_indel_signatures", "deconstructsigs_sbs_signatures", "activities_sbs_signatures", "hrdetect", "onenesstwoness", "msisensorpro", "denoised_coverage_field", "summary")
+    fix_entries = c("tumor_type", "disease", "primary_site", "inferred_sex", "jabba_gg", "events", "somatic_snvs", "germline_snvs", "tumor_coverage", "estimate_library_complexity", "alignment_summary_metrics", "insert_size_metrics", "wgs_metrics", "het_pileups", "activities_indel_signatures", "decomposed_indel_signatures", "matrix_indel_signatures", "deconstructsigs_sbs_signatures", "activities_sbs_signatures", "decomposed_sbs_signatures","matrix_sbs_signatures","hrdetect", "onenesstwoness", "msisensorpro", "denoised_coverage_field", "summary")
     for (x in fix_entries) {
         if (!exists(x) || is.null(get(x)) || is.na(get(x))) {
             assign(x, NULL)
@@ -1155,7 +1308,11 @@ create_metadata <- function(
     metadata <- add_signatures(
         metadata,
         activities_sbs_signatures,
+        decomposed_sbs_signatures,
+        matrix_sbs_signatures,
         activities_indel_signatures,
+        decomposed_indel_signatures,
+        matrix_indel_signatures,
         deconstructsigs_sbs_signatures
     )
     
@@ -1286,6 +1443,10 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
                 het_pileups = row$het_pileups,
                 activities_sbs_signatures = row$activities_sbs_signatures,
                 activities_indel_signatures = row$activities_indel_signatures,
+                decomposed_sbs_signatures = row$decomposed_sbs_signatures,
+                decomposed_indel_signatures = row$decomposed_indel_signatures,
+                matrix_indel_signatures = row$matrix_indel_signatures,
+                matrix_sbs_signatures = row$matrix_sbs_signatures,
                 hrdetect = row$hrdetect,
                 onenesstwoness = row$onenesstwoness,
                 msisensorpro = row$msisensorpro,
