@@ -4,7 +4,7 @@
 \alias{process_jabba}
 \title{Read jabba}
 \usage{
-process_jabba(jabba)
+process_jabba(jabba, allow_return_null = FALSE)
 }
 \description{
 Function to flexibly read in jabba files whether providing raw jabba list or ggraph

@@ -65,7 +65,7 @@ annotate_karyotype = function(
   rcyto_arm = gUtils::gr_deconstruct_by(rcyto_by_arm, by = "arm", meta = TRUE)
   rcyto_arm_dt = gUtils::gr2dt(rcyto_arm)
 
-  annotated_tra_inv = ""
+  annotated_tra_inv_raw = annotated_tra_inv = ""
 
   ge = gg$edges
   geAlt = ge[ge$dt$type == "ALT"]
@@ -144,7 +144,7 @@ annotate_karyotype = function(
     chr_length = genome_sl
   )
 
-  annotated_cna = ""
+  annotated_band_cna_raw = annotated_cna = ""
 
   events = segments[
     width(segments) > segment_size_threshold ## Removing small segs, will collapse eventually

@@ -8,7 +8,8 @@ lift_metadata(
   cohort,
   output_data_dir,
   cores = 1,
-  genome_length = c(1:22, "X", "Y")
+  genome_length = c(1:22, "X", "Y"),
+  do_lift_datafiles_json = TRUE
 )
 }
 \arguments{

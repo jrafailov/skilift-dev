@@ -201,6 +201,210 @@ process_cytoband <- function(cyto = NULL, coarse = FALSE) {
   return(cyto)
 }
 
+eNROW = function (x) {
+    return(vapply(x, NROW, integer(1)))
+}
+
+coalesce = function (..., bads = NA, bads.x = NULL, bads.y = NULL, r2l = FALSE, 
+    fromLast = FALSE, opposite = TRUE, comparefun = NULL, remove.empty = TRUE) 
+{
+    lst = list(...)
+    lens = eNROW(lst)
+    maxlen = max(lens)
+    if (length(unique(lens)) > 1) 
+        lst = lapply(lst, function(x) rep(x, length.out = maxlen))
+    if (remove.empty) 
+        lst = lst[eNROW(lst) > 0]
+    if (!length(bads) && !length(bads.x) && !length(bads.y)) 
+        stop("You gotta set one of bads, bads.x, or bads.y")
+    if ({
+        length(bads.x) && length(bads.y)
+    }) {
+        message("bads.x and bads.y both set explicitly")
+        message("setting opposite to FALSE")
+        opposite = FALSE
+    }
+    anytrue = function(vec) rep(TRUE, length.out = length(vec))
+    if (isTRUE(bads) || !length(bads)) {
+        message("bads set to NULL or TRUE")
+        message("setting opposite to FALSE")
+        bads = anytrue
+        opposite = FALSE
+    }
+    if (opposite) {
+        yfun = get("!", mode = "function")
+    }
+    else {
+        yfun = get("identity", mode = "function")
+    }
+    if (!length(bads.x)) 
+        bads.x = bads
+    if (!length(bads.y)) 
+        bads.y = bads
+    dofun = function(x, y) {
+        if (is.function(bads.x)) 
+            badsx = which(bads.x(x))
+        else badsx = which(x %in% bads.x)
+        if (is.function(bads.y)) 
+            nbadsy = which(yfun(bads.y(y)))
+        else nbadsy = which(yfun(y %in% bads.y))
+        ix = intersect(badsx, nbadsy)
+        return(replace(x, ix, rep(y[ix], length.out = length(ix))))
+    }
+    if (is.null(comparefun)) {
+        if (!r2l) 
+            return(Reduce(function(x, y) dofun(x, y), lst, right = fromLast))
+        else return(Reduce(function(x, y) dofun(y, x), lst, right = fromLast))
+    }
+    else {
+        yfun = get("identity", mode = "function")
+        if (!r2l) {
+            return(Reduce(function(x, y) {
+                if (is.function(bads.x)) badsx = which(bads.x(x)) else badsx = which(x %in% 
+                  bads.x)
+                if (is.function(bads.y)) nbadsy = which(yfun(bads.y(y))) else nbadsy = which(yfun(y %in% 
+                  bads.y))
+                lg = which(comparefun(x, y))
+                lg = setdiff(lg, nbadsy)
+                out = x
+                out[badsx] = y[badsx]
+                out[lg] = y[lg]
+                out
+            }, lst, right = fromLast))
+        }
+        else {
+            return(Reduce(function(x, y) {
+                if (is.function(bads.x)) badsx = which(bads.x(x)) else badsx = which(x %in% 
+                  bads.x)
+                if (is.function(bads.y)) nbadsy = which(yfun(bads.y(y))) else nbadsy = which(yfun(y %in% 
+                  bads.y))
+                lg = which(comparefun(x, y))
+                lg = setdiff(lg, nbadsy)
+                out = y
+                out[nbadsy] = x[nbadsy]
+                out[lg] = x[lg]
+                out
+            }, lst, right = fromLast))
+        }
+    }
+}
+
+create_cytomap = function() {
+  cytos = Skilift:::process_cytoband()
+
+  digits2 = gsub("([pq][[:alnum:]]{2,}).[[:alnum:]]+", "\\1", cytos$band)
+
+  digits3 = gsub("([pq][[:alnum:]]{2,}.[[:alnum:]]{1,1})[[:alnum:]]+", "\\1", cytos$band, perl = TRUE)
+  digits3 = ifelse(nchar(digits3) != 5, NA_character_, digits3)
+
+  digits4 = gsub("([pq][[:alnum:]]{2,}.[[:alnum:]]{2,2})[[:alnum:]]+", "\\1", cytos$band, perl = TRUE)
+  digits4 = ifelse(nchar(digits4) != 6, NA_character_, digits4)
+  digits5 = gsub("([pq][[:alnum:]]{2,}.[[:alnum:]]{3,3})[[:alnum:]]+", "\\1", cytos$band,  perl = TRUE)
+  digits5 = ifelse(nchar(digits5) != 7, NA_character_, digits5)
+
+  ## digits6 = gsub("([pq][[:alnum:]]{2,}.[[:alnum:]]{4,})[[:alnum:]]+", "\\1", cytos$band)
+  ## digits6 = ifelse(nchar(digits6) != 8, NA_character_, digits6)
+
+
+  cytos$digits2 = digits2
+  cytos$digits3 = digits3
+  cytos$digits4 = digits4
+  cytos$digits5 = digits5
+
+  minres_band23 = Skilift:::coalesce(cytos$digits3, cytos$digits2)
+  cytos$terband = minres_band23
+
+  cytos$arm = gsub("(p|q).*", "\\1", cytos$band)
+
+  grcyto = (
+    GenomicRanges::reduce(gUtils::gr_construct_by(cytos, c("chrom_name", "arm", "terband")))
+    %>% gUtils::gr_deconstruct_by(c("chrom_name", "arm", "terband"), meta = TRUE)
+  )
+  GenomeInfoDb::seqlevelsStyle(grcyto) = "NCBI"
+  grcyto = GenomeInfoDb::sortSeqlevels(grcyto)
+  grcyto = GenomicRanges::sort(grcyto, ignore.strand = FALSE)
+
+  dtcytoter = (
+    grcyto
+    %>% as.data.frame()
+    %>% data.table::setDT()
+  )
+
+
+  dtcytoter = dtcytoter[, .SD[c(1, .N)], by = seqnames]
+
+
+  gr_chr = (
+    GenomicRanges::reduce(gUtils::gr_construct_by(cytos, c("chrom_name")))
+    %>% gUtils::gr_deconstruct_by(c("chrom_name"), meta = TRUE)
+  )
+  GenomeInfoDb::seqlevelsStyle(gr_chr) = "NCBI"
+  gr_chr = GenomeInfoDb::sortSeqlevels(gr_chr)
+  gr_chr = GenomicRanges::sort(gr_chr, ignore.strand = FALSE)
+
+  dtchr = (
+    gr_chr
+    %>% as.data.frame()
+    %>% data.table::setDT()
+  )
+
+
+  ranges_2 = cytos[!is.na(cytos$digits2)]
+  ranges_2$band = ranges_2$digits2
+
+  ranges_3 = cytos[!is.na(cytos$digits3)]
+  ranges_3$band = ranges_3$digits3
+
+  ranges_4 = cytos[!is.na(cytos$digits4)]
+  ranges_4$band = ranges_4$digits4
+
+  ranges_5 = cytos[!is.na(cytos$digits5)]
+  ranges_5$band = ranges_5$digits5
+
+  ranges_arm = cytos[!is.na(cytos$arm)]
+  ranges_arm$band = ranges_arm$arm
+
+  ranges_ter = dtcytoter[, .(seqnames, start, end, band = ifelse(arm == "p", "pter", "qter"))] %>% as("GRanges")
+
+  ranges_chr = dtchr[, .(seqnames, start, end, band = "chrom")] %>% as("GRanges")
+
+  allcytolevels = c(
+    ranges_2,
+    ranges_3,
+    ranges_4,
+    ranges_5,
+    ranges_arm,
+    ranges_ter,
+    ranges_chr
+  )
+
+
+  cytos_by_level = GenomicRanges::reduce(
+    gUtils::gr_construct_by(allcytolevels, "band"),
+    with.revmap = TRUE
+  )
+
+  allcytolevels = gUtils::gr_deconstruct_by(cytos_by_level, meta = TRUE, by = "band")
+
+  cytomap = setDT(as.data.frame(allcytolevels))[]
+  cytomap$chrom = as.character(cytomap$seqnames)
+  setkeyv(cytomap, c("chrom", "band"))
+
+  cytomap$category = data.table::fcase(
+    cytomap$band == "chrom", "chromosome",
+    cytomap$band %in% c("p", "q"), "arm",
+    default = "band"
+  )
+  cytomap$category_width = as.numeric(cytomap$width)
+  return(cytomap)
+    
+
+  ## saveRDS(cytomap, "~/DB/UCSC/hg19.cytoband.map.rds")
+  ## normalizePath("~/DB/UCSC/hg19.cytoband.map.rds")
+  ## "/gpfs/data/imielinskilab/DB/UCSC/hg19.cytoband.map.rds"
+
+}
+
 
 
 #' Global HemeDB path
@@ -478,36 +682,6 @@ get_gene_copy_numbers <- function(
       gene_width = gene_width[1]
     ), by = gene_name]
     
-    # gene_cn_table = data.table::merge.data.table(
-    #   gr2dt(gene_ranges),
-    #   gene_cn_stats,
-    #   by = "gene_name",
-    #   suffixes = c("", "__DUPED")
-    # )
-    
-    ## split_genes = gene_cn_segments[duplicated(get(gene_id_col)), 
-    ##     get(gene_id_col)]
-    ## gene_cn_non_split_genes = gene_cn_segments[!(get(gene_id_col) %in% 
-    ##     split_genes)]
-    ## gene_cn_non_split_genes[, `:=`(max_normalized_cn = normalized_cn, 
-    ##     min_normalized_cn = normalized_cn, max_cn = cn, min_cn = cn, 
-    ##     number_of_cn_segments = 1, cn = NULL, normalized_cn = NULL)]
-    ## gene_cn_split_genes_min = gene_cn_segments[get(gene_id_col) %in% 
-    ##     split_genes, .SD[which.min(cn)], by = gene_id_col]
-    ## gene_cn_split_genes_min[, `:=`(min_normalized_cn = normalized_cn, 
-    ##     min_cn = cn, cn = NULL, normalized_cn = NULL)]
-    ## gene_cn_split_genes_max = gene_cn_segments[get(gene_id_col) %in% 
-    ##     split_genes, .SD[which.max(cn)], by = gene_id_col][, 
-    ##     .(get(gene_id_col), max_normalized_cn = normalized_cn, 
-    ##         max_cn = cn)]
-    ## setnames(gene_cn_split_genes_max, "V1", gene_id_col)
-    ## number_of_segments_per_split_gene = gene_cn_segments[get(gene_id_col) %in% 
-    ##     split_genes, .(number_of_cn_segments = .N), by = gene_id_col]
-    ## gene_cn_split_genes = merge(gene_cn_split_genes_min, gene_cn_split_genes_max, 
-    ##     by = gene_id_col)
-    ## gene_cn_split_genes = merge(gene_cn_split_genes, number_of_segments_per_split_gene, 
-    ##     by = gene_id_col)
-    ## gene_cn_table = rbind(gene_cn_split_genes, gene_cn_non_split_genes)
     if (output_type == "data.table") {
         return(gene_cn_table)
     }
@@ -534,8 +708,23 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
 	max_cn_quantile_threshold = max_cn_quantile_threshold
 )
   gene_CN[, `:=`(type, NA_character_)]
+  gencode = dynGet("gencode")
+  exons_merged = GenomicRanges::reduce(gUtils::gr_construct_by(gencode[gencode$type == "exon"], by = "gene_name"))
+  ## exons_merged = gUtils::gr_deconstruct_by(exons_merged, meta = TRUE, "gene_name")
+  exons_merged$exon_width = width(exons_merged)
+  gr_gene_cn = dt2gr(gene_CN)
+  gr_gene_cn = gUtils::gr_construct_by(gr_gene_cn, by = "gene_name")
+  exons_merged = dt2gr(gr2dt(exons_merged)[, total_exon_width := sum(exon_width), by = seqnames])
+  ## gr_gene_cn = gUtils::gr.val(gr_gene_cn, exons_merged, val = c("exon_width"), mean = FALSE)
+  exon_cn = gr2dt(gr_gene_cn %*% exons_merged)
+  exon_cn_map = exon_cn[, .(overlapped_exon_width = sum(width), total_exon_width = total_exon_width[1]), keyby = query.id]
+  exon_cn_map = exon_cn_map[list(seq_len(NROW(gene_CN)))]
+  #   gene_CN[min_normalized_cn >= amp.thresh, `:=`(type, "amp")]
+
+  gene_CN$overlapped_exon_width = exon_cn_map$overlapped_exon_width
+  gene_CN$total_exon_width = exon_cn_map$total_exon_width
+
   
-#   gene_CN[min_normalized_cn >= amp.thresh, `:=`(type, "amp")]
   gene_CN[min_quantile_normalized_cn >= amp.thresh & cn >= amp.thresh, `:=`(type, "amp")]
   gene_CN[min_cn > 1 & cn > 1 & min_normalized_cn < del.thresh, `:=`(
     type,
@@ -563,7 +752,8 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
         avg_cn = avg_cn[1],
         number_of_cn_segments = number_of_cn_segments[1],
         gene_width = gene_width[1],
-        total_node_width = sum(width) # This must be calculated after nominating SCNA type, not before.,
+        total_node_width = sum(width), # This must be calculated after nominating SCNA type, not before.,
+        exon_frac = sum(overlapped_exon_width / total_exon_width, na.rm = TRUE)
       ), 
       by = .(gene_name, type)]
   )
@@ -776,7 +966,8 @@ collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh
   is_valid_oncokb_cna = rep(FALSE, NROW(oncokb_cna))
   for (match_lst in matches) {
       valid_gene = scna[
-          scna$total_node_width > 1e3
+          ## scna$total_node_width > 1e3
+          scna$exon_frac > 0.9
           & scna$type == match_lst[2],
 
       ]$gene_name
@@ -1717,7 +1908,7 @@ lift_filtered_events <- function(cohort, output_data_dir, cores = 1, return_tabl
         highlights_out_file <- file.path(pair_dir, "highlights.json")
 
         out = NULL
-		# string_summary = ""
+		string_summary = ""
         futile.logger::flog.threshold("ERROR")
         tryCatchLog({
             out <- create_filtered_events(
@@ -1732,7 +1923,9 @@ lift_filtered_events <- function(cohort, output_data_dir, cores = 1, return_tabl
               create_heme_highlights(
                 events_tbl = out,
                 jabba_gg = row[[jabba_column]],
-                out_file = highlights_out_file
+                out_file = highlights_out_file,
+                tumor_type = row$tumor_type,
+                cohorttuple = row
               )
             }
 			string_summary = create_summary(

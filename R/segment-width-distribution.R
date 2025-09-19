@@ -57,10 +57,16 @@ get_segstats <- function(
     # signal_mutl = sum(signal * cov_w, na.rm = T)
     # mcols(cov)[[coverage_field]] = as.numeric(signal * (cov_sw / signal_mutl))
 
+
   if (is.character(balanced_jabba_gg)) {
     balanced_jabba_gg = process_jabba(balanced_jabba_gg)
   }
-  balanced_gg_gr <- balanced_jabba_gg$nodes$gr
+  is_granges = inherits(balanced_jabba_gg, "GRanges")
+  is_gg = inherits(balanced_jabba_gg, "R6")
+  if (is_granges) balanced_gg_gr = balanced_jabba_gg
+  if (is_gg) balanced_gg_gr = balanced_jabba_gg$nodes$gr
+  is_invalid = !is_granges && !is_gg
+  if (is_invalid) stop("get_segstats input invalid, needs to be segment GRanges or gGraph")
     segstats <- JaBbA:::segstats(
         balanced_gg_gr,
         cov,
@@ -142,7 +148,11 @@ lift_segment_width_distribution <- function(
                 }
 
                 # Get sequence lengths from the gGraph
-                seq_lengths <- seqlengths(ggraph$nodes$gr)
+                ## seq_lengths <- seqlengths(ggraph$nodes$gr)
+                seq_lengths = seqlengths(GenomeInfoDb::keepStandardChromosomes(ggraph$nodes$gr, pruning.mode = "coarse"))
+                
+                seq_lengths = seq_lengths[!names(seq_lengths) %in% c("Y", "chry", "chrY", "24", "MT", "chrmt", "chrM", "chrm", "X", "chrX", "23")]
+
 
                 # Check for required fields
                 colnames_check <- c(
@@ -182,7 +192,8 @@ lift_segment_width_distribution <- function(
                 annotations = if (!is.null(annotations)) unlist(annotations) else NULL
 
                 # Create JSON
-                gGnome::refresh(ggraph.reduced)$json(
+                ggout = gGnome::refresh(ggraph.reduced)
+                ggout$json(
                     filename = out_file,
                     verbose = TRUE,
                     annotations = annotations,

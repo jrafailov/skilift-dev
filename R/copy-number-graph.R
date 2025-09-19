@@ -61,6 +61,7 @@ lift_copy_number_graph <- function(
                 ggraph <- process_jabba(ggraph_path)
 
 				if (is_allelic) {
+                    ggraph = Skilift::collapse_allelic_ggraph(ggraph)
 					allele_var = base::get0(
 						"allele",
 						as.environment(as.list(ggraph$nodes$dt)),
@@ -143,4 +144,103 @@ lift_copy_number_graph <- function(
     }, mc.cores = cores, mc.preschedule = TRUE)
     
     invisible(NULL)
+}
+
+
+#' Collapse Allelic graph
+#'
+#' Reduce number of segments by ignoring phase switches.
+#' And redundant segments -- adjacent segments with the same
+#' major and minor allele copy numbers
+#' 
+#' @export
+collapse_allelic_ggraph = function(gg) {
+    gr = gg$nodes$gr
+    gr_major = unname(gr[gr$allele == "major"])
+    gr_minor = unname(gr[gr$allele == "minor"])
+
+    is_valid = all(gr_major == gr_minor)
+    if (!is_valid) stop("Allelic graph is not collapsible!")
+
+    gr_major$cn_minor = gr_minor$cn
+    gr_major$cn_major = gr_major$cn
+    gr_minor$cn_major = gr_major$cn
+    gr_minor$cn_minor = gr_minor$cn
+
+    gr_by_cn = gUtils::gr_construct_by(c(gr_major, gr_minor), by = c("allele", "cn_minor", "cn_major"))
+
+    gr_collapsed = (
+        GenomicRanges::reduce(gr_by_cn, with.revmap = TRUE)
+        %>% gUtils::gr_deconstruct_by(meta = TRUE, by = c("allele", "cn_minor", "cn_major"))
+        %>% GenomeInfoDb::sortSeqlevels()
+        %>% sort()
+    )
+
+    mc = mcols(gr_collapsed)
+    for (col in c("cn_minor", "cn_major")) {
+        mc[[col]] = as.numeric(mc[[col]])
+    }
+    mcols(gr_collapsed) = mc
+
+    dt_collapsed = setDT(as.data.frame(gr_collapsed))
+
+    nodeid_firstlast = (
+        gGnome::dunlist(dt_collapsed$revmap)
+        [, .SD[order(V1)], by = listid]
+        [, .(nodeid_left = V1[1], nodeid_right = V1[.N]), keyby = listid]
+    )
+
+    mc = mcols(gr_collapsed)
+    for (col in names(nodeid_firstlast)) {
+        mc[[col]] = nodeid_firstlast[[col]]
+    }
+    mcols(gr_collapsed) = mc
+
+    gr_collapsed = gr_collapsed %Q% (order(allele, seqnames, start, end))
+
+    gr_collapsed$nodeid_collapsed = seq_len(NROW(gr_collapsed))
+
+    dt_collapsed = setDT(as.data.frame(gr_collapsed))
+
+    dt_collapsed_melted = dt_collapsed %>% data.table::melt.data.table(measure.vars = c("nodeid_left", "nodeid_right"))
+
+    dt_collapsed_melted[, variable := gsub("nodeid_", "", variable)][]
+
+    alledges = (
+        gg$edges$dt[
+            (type == "ALT" & class != "REF")
+            | (type == "REF")
+        ]
+    )
+
+    gr_collapsed$col = ifelse(gr_collapsed$allele == "major", "#FF000080", "#0000FF80")
+    gr_collapsed$ywid = 0.8
+
+    edges_n1 = merge(
+        alledges,
+        dt_collapsed_melted[, .(allele, variable, value, n1_collapsed = nodeid_collapsed)],
+        by.x = c("n1.allele", "n1.side", "n1"), by.y = c("allele", "variable", "value"), 
+        all.x = TRUE
+    )
+
+    edges_n12 = merge(
+        edges_n1,
+        dt_collapsed_melted[, .(allele, variable, value, n2_collapsed = nodeid_collapsed)],
+        by.x = c("n2.allele", "n2.side", "n2"), by.y = c("allele", "variable", "value"), all.x = TRUE
+    )
+
+    edges_collapsed = edges_n12[!is.na(n1_collapsed) & !is.na(n2_collapsed)]
+
+    edges_collapsed$n1___parent = edges_collapsed$n1
+    edges_collapsed$n2___parent = edges_collapsed$n2
+
+    edges_collapsed$n1 = edges_collapsed$n1_collapsed
+    edges_collapsed$n2 = edges_collapsed$n2_collapsed
+
+    gr_collapsed$cn = ifelse(gr_collapsed$allele == "major", gr_collapsed$cn_major, gr_collapsed$cn_minor)
+    gg_collapsed = gG(nodes = gr_collapsed, edges = edges_collapsed)
+    gg_collapsed$set(y.field = "cn")
+
+    return(gg_collapsed)
+
 }

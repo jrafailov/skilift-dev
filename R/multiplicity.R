@@ -52,6 +52,10 @@ annotate_multihit = function(oncokb_mult) { ## oncokb multiplicity merged output
 		]
 	)
 
+  setkey(oncokb_pc_hits, I)
+
+
+
 	oncokb_mult$num_protein_coding_hits_per_gene = oncokb_pc_hits$num_protein_coding_hits
 
 
@@ -84,6 +88,7 @@ annotate_multihit = function(oncokb_mult) { ## oncokb multiplicity merged output
 		),
 		by = Hugo_Symbol]
 	)
+  setkey(oncokb_multi_hits, I)
 
 
 	oncokb_mult$is_multi_hit_per_gene = oncokb_multi_hits$is_multi_hit_per_gene
@@ -419,7 +424,7 @@ multiplicity_to_intervals <- function(
     node_metadata = NULL,
     reference_name = "hg19",
     cohort_type,
-	subsample_size = 1e4
+	subsample_size = 1e3
 ) {
     # Load chromosome lengths from settings
     settings_data <- jsonlite::fromJSON(settings)

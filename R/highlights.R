@@ -10,7 +10,9 @@ create_heme_highlights = function(
   jabba_gg,
   out_file,
   hemedb_path = Skilift:::HEMEDB(),
-  duncavage_path = Skilift:::DUNCAVAGEDB()
+  duncavage_path = Skilift:::DUNCAVAGEDB(),
+  tumor_type = NULL,
+  cohorttuple
 ) {
   ## {
   ##   "karotype": <string> | null,
@@ -26,6 +28,8 @@ create_heme_highlights = function(
   ##     }
   ##     ] | null
   ##   }
+  
+  
   
   ## TODO: remove everything below except for karyotype_string
   karyotype_string = ""
@@ -120,6 +124,48 @@ create_heme_highlights = function(
       select = changemap
       )
   }
+
+  ## FLT3-ITD special annotation
+  is_flt3itd = identical(tolower(readRDS(cohorttuple$itdseek_rds)), "positive")
+
+  flt3ForJson = data.table::copy(emptyDfForJson)
+  if (is_flt3itd) {
+    dt_flt3 = data.table(
+        gene = "FLT3",
+        variant = NA_character_,
+        VAF = NA_real_,
+        Tier = NA_real_,
+        estimated_altered_copies = NA_integer_,
+        segment_cn = NA_real_,
+        alteration_type = "ITD",
+        aggregate_label = NA_character_,
+        DISEASE = NA
+    )
+
+
+    changemap = c(
+      "gene" = "gene_name",
+      "variant" = "variant",
+      "VAF" = "vaf",
+      "Tier" = "tier",
+      "estimated_altered_copies" = "altered_copies",
+      "segment_cn" = "total_copies",
+      "alteration_type" = "alteration_type",
+      "aggregate_label" = "aggregate_label",
+      "DISEASE" = "indication"
+    )
+
+
+    flt3ForJson = base::subset(
+      Skilift:::change_names(
+          dt_flt3,
+          changemap
+      ),
+      select = changemap
+    )
+  }
+
+
 
 
 
@@ -252,28 +298,50 @@ create_heme_highlights = function(
       select = changemap
     )
   }
+  risk_level_eln = NULL
 
-  risk_level_eln = create_heme_highlights_eln_risk_score(
-    small_muts = small_muts,
-    svs = svs,
-    cna = cna,
-    karyotype_list = karyotype_list,
-    jabba_gg = jabba_gg
+  is_aml = (
+    !is.null(tumor_type)
+    && (grepl("AML", tumor_type, ignore.case = TRUE)
+    || grepl("acute myeloid", tumor_type, ignore.case = TRUE)) 
+    && TRUE ## this ensures that this is length one boolean, otherwise errors
   )
+
+  if (is_aml) {
+    risk_level_eln = create_heme_highlights_eln_risk_score(
+      small_muts = small_muts,
+      svs = svs,
+      cna = cna,
+      karyotype_list = karyotype_list,
+      jabba_gg = jabba_gg
+    )
+  }
 
   allOutputsForJson = rbind(
     smallForJson,
     cnaForJson,
-    svsForJson
+    svsForJson,
+    flt3ForJson
   )
+
+  risk_json_array = list()
+
+  is_eln_risk_populated = !is.null(risk_level_eln) && !any(is.na(risk_level_eln)) && NROW(risk_level_eln) > 0
+  if (is_eln_risk_populated) {
+    risk_json_array = c(
+      risk_json_array,
+      ## below syntax is to ensure that the key:value pair gets added as a json record
+      list(list("ELN" = jsonlite::unbox(risk_level_eln)))
+    )
+  }
+  
 
   highlights_output = list(
     karyotype = jsonlite::unbox(karyotype_string),
-    risk_level_eln = jsonlite::unbox(risk_level_eln),
+    ## risk_level_eln = jsonlite::unbox(risk_level_eln),
+    risk_score = risk_json_array,
     gene_mutations = allOutputsForJson
   )
-
-  print(highlights_output)
 
   jsonlite::write_json(
     highlights_output, 
@@ -295,7 +363,6 @@ create_heme_highlights = function(
 #' fusion genes (not taken from karyotypes, but the gene level annotations), 
 #' and arm level CNA (taken from karyotypes).
 create_heme_highlights_eln_risk_score = function(small_muts, svs, cna, karyotype_list, jabba_gg) {
-
   gg = Skilift:::process_jabba(jabba_gg)
 
   levels_eln = c("Favorable" = "Favorable", "Intermediate" = "Intermediate", "Adverse" = "Adverse")
@@ -330,19 +397,54 @@ create_heme_highlights_eln_risk_score = function(small_muts, svs, cna, karyotype
   GenomeInfoDb::seqlevelsStyle(gr_nodes) = "NCBI"
   gr_nodes = GenomeInfoDb::sortSeqlevels(gr_nodes)
   gr_nodes = sort(gr_nodes, ignore.strand = TRUE)
-  gr_nodes = gr_nodes[as.character(seqnames(gr_nodes)) %in% c(1:22, "X", "Y")]
+  ## FIXME: Need to account for Y once finished.
+  gr_nodes = (
+      gr_nodes[
+          as.character(seqnames(gr_nodes))
+          %in% c(
+            1:22,
+            "X"
+           ## ,
+            ## "Y"
+          )
+      ]
+  )
   dt_nodes = gr2dt(gr_nodes)
   ploidy_chrom_per = dt_nodes[!is.na(cn), .(ploidy_chrom = sum(cn * width) / sum(width)), by = seqnames]
 
   ploidy_chrom = sum(round(ploidy_chrom_per$ploidy_chrom))
 
-  chromosomal_abnormalities = c(karyotype_list$annotated_chr_cna, karyotype_list$annotated_arm_cna)
+  ## FIXME: Y
+  cytomap = Skilift:::create_cytomap()
+  MIN_DIST=5e6
+  PAD=round(MIN_DIST / 2)
+  gr_aberrant_seg = GenomicRanges::reduce(gr_nodes[
+    gr_nodes$cn != 2 & !as.logical(seqnames(gr_nodes) == "Y")
+  ] + PAD) - PAD
+  seqdf = as.data.frame(GenomeInfoDb::seqlengths(gr_nodes))
+  gr_aberrant_seg$chromwidth = seqdf[as.character(seqnames(gr_aberrant_seg)),]
+  is_chrom = as.integer(width(gr_aberrant_seg)) / gr_aberrant_seg$chromwidth > 0.9
+  is_large = width(gr_aberrant_seg) > MIN_DIST
+  gr_aberrant_seg = gr_aberrant_seg[!is_chrom & is_large]
+  dtov = gr2dt(gr_aberrant_seg %*% dt2gr(cytomap))
+  dtov = dtov[, .(fracov = sum(width) / category_width[1], band = list(band)), by = .(seqnames, query.id, category)]
+  dtov = dtov[!category == "chromosome" & fracov > 0.99]
+  dtov = dtov[!category == "arm" & fracov > 0.99]
+  dtovbigbands = dtov
+
+  chromosomal_abnormalities = c(
+    karyotype_list$annotated_chr_cna,
+    karyotype_list$annotated_arm_cna
+  )
+
+  
+  
 
   is_hyperdiploid = sum(ploidy_chrom) > 46 && ploidy_genome > 2.7
   is_hypodiploid = sum(ploidy_chrom) <= 24 && ploidy_genome < 2
   is_complex = (
       ! is_hyperdiploid
-      & NROW(chromosomal_abnormalities) >= 3
+      & NROW(chromosomal_abnormalities) + NROW(dtovbigbands) >= 3
   )
   is_eln_risk_adverse = is_complex || is_hypodiploid
 
@@ -363,8 +465,10 @@ create_heme_highlights_eln_risk_score = function(small_muts, svs, cna, karyotype
   is_any_flt3_itd = any(is_flt3_itd)
 
   epigene_list = c("ASXL1", "BCOR", "EZH2", "RUNX1", "SF3B1", "STAG2", "U2AF1", "ZRSR2")
-  is_gene_epigene = small_muts$gene %in% epigene_list
-  is_any_gene_epigene_altered = any(is_gene_epigene)
+  is_gene_epigene_small_mut = small_muts$gene %in% epigene_list
+  is_gene_epigene_cna = cna[vartype == "HOMDEL"]$gene %in% epigene_list
+  is_any_gene_epigene_altered = any(is_gene_epigene_small_mut) || any(is_gene_epigene_cna)
+  
   
   is_eln_risk_adverse = is_any_flt3_itd && is_any_gene_epigene_altered
   

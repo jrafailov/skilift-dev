@@ -11,7 +11,7 @@ multiplicity_to_intervals(
   node_metadata = NULL,
   reference_name = "hg19",
   cohort_type,
-  subsample_size = 10000
+  subsample_size = 1000
 )
 }
 \arguments{
