@@ -220,6 +220,7 @@ process_qc_metrics <- function(
     pair
 ) {
 
+
     # Define metric mappings for each file type
     complexity_metrics_cols <- c(
         read_pairs_examined = "READ_PAIRS_EXAMINED",
@@ -982,9 +983,7 @@ compute_cosine_similarity <- function(
     
     weighted_expected <- as.matrix(expected_reads)
     
-    for(sig in matching_signatures) {
-        weighted_expected[, sig] <- weighted_expected[, sig] * activities[[sig]]
-    }
+    weighted_expected[, matching_signatures] <- sweep(weighted_expected[, matching_signatures], 2, activities[matching_signatures], "*")
 
     ### ATTRIBUTED SIGNATURES ###     
     probabilities = fread(probabilities, fill = TRUE)
@@ -1000,23 +999,32 @@ compute_cosine_similarity <- function(
     }
     
     ### COMPUTING COSINE SIMILARITY ###
-    weighted_prob_matrix <- prob.matrix
-    for (i in 1:ncol(prob.matrix)) {
-        weighted_prob_matrix[, i] <- prob.matrix[, i] * multiplier
-    }
+    weighted_prob_matrix <- sweep(prob.matrix, 1, multiplier, "*")
 
     cosine_similarities <- numeric(ncol(weighted_prob_matrix))
     names(cosine_similarities) <- colnames(weighted_prob_matrix)
     
-    for (i in 1:ncol(weighted_prob_matrix)) {
-        vec_a <- weighted_prob_matrix[, i]
-        vec_b <- weighted_expected[, i]
-        min_length <- min(length(vec_a), length(vec_b))
-        vec_a <- vec_a[1:min_length]
-        vec_b <- vec_b[1:min_length]
-        cosine_similarity <- sum(vec_a * vec_b) / (sqrt(sum(vec_a^2)) * sqrt(sum(vec_b^2)))
-        cosine_similarities[i] <- cosine_similarity
+    # Ensure matching columns only
+    common_sigs <- intersect(colnames(weighted_prob_matrix), colnames(weighted_expected))
+    
+    if (length(common_sigs) == 0) {
+        warning("No common signatures between matrices")
+        return(NULL)
     }
+    
+    # Subset to common columns
+    prob_subset <- weighted_prob_matrix[, common_sigs, drop = FALSE]
+    exp_subset <- weighted_expected[, common_sigs, drop = FALSE]
+    
+    # Vectorized cosine similarity calculation
+    dot_products <- colSums(prob_subset * exp_subset)
+    norms_prob <- sqrt(colSums(prob_subset^2))
+    norms_exp <- sqrt(colSums(exp_subset^2))
+    
+    # Handle zero norm cases
+    zero_norms <- (norms_prob == 0) | (norms_exp == 0)
+    cosine_similarities <- ifelse(zero_norms, 0, dot_products / (norms_prob * norms_exp))
+    names(cosine_similarities) <- common_sigs
 
     # Replace NaN values with 0
     cosine_similarities[is.nan(cosine_similarities)] <- 0
@@ -1078,15 +1086,20 @@ add_signatures <- function(
         metadata$signatures <- list(as.list(signatures[["sbs_fraction"]]))
         
         if (!is.null(decomposed_sbs_signatures) && !is.null(matrix_sbs_signatures)) {
-            cosine_similarities <- compute_cosine_similarity(
+            tryCatch({
+
+                cosine_similarities <- compute_cosine_similarity(
                 metadata = metadata,
                 probabilities = decomposed_sbs_signatures,
                 matrix_file = matrix_sbs_signatures,
                 is_indel = FALSE,
                 is_deconstruct_sigs = FALSE #' TODO ADD FUNCTIONALITY FOR different references
-            )
+                )
 
-            metadata$sigprofiler_sbs_cosine_similarity <- list(as.list(cosine_similarities[["cosine_similarities"]]))
+                metadata$sigprofiler_sbs_cosine_similarity <- list(as.list(cosine_similarities[["cosine_similarities"]]))
+            }, error = function(e) {
+                warning(sprintf("Error computing SBS cosine similarities: %s", e$message))
+            })
         }
     }
 
@@ -1102,15 +1115,20 @@ add_signatures <- function(
 
         if(!is.null(decomposed_indel_signatures) && !is.null(matrix_indel_signatures)) {
             
-            cosine_similarities <- compute_cosine_similarity(
-                metadata = metadata,
-                probabilities = decomposed_indel_signatures,
-                matrix_file = matrix_indel_signatures,
-                is_indel = TRUE,
-                is_deconstruct_sigs = FALSE #' TODO ADD FUNCTIONALITY FOR different references
-            )
 
-             metadata$sigprofiler_indel_cosine_similarity <- list(as.list(cosine_similarities[["cosine_similarities"]]))
+            tryCatch({
+                cosine_similarities <- compute_cosine_similarity(
+                    metadata = metadata,
+                    probabilities = decomposed_indel_signatures,
+                    matrix_file = matrix_indel_signatures,
+                    is_indel = TRUE,
+                    is_deconstruct_sigs = FALSE #' TODO ADD FUNCTIONALITY FOR different references
+                )
+
+                metadata$sigprofiler_indel_cosine_similarity <- list(as.list(cosine_similarities[["cosine_similarities"]]))
+            }, error = function(e) {
+                warning(sprintf("Error computing indel cosine similarities: %s", e$message))
+            })
         }
     }
 
@@ -1283,6 +1301,7 @@ create_metadata <- function(
 	summary = NULL,
     cohort_type = NULL
 ) {
+
     # Initialize metadata with all possible columns
     metadata <- initialize_metadata_columns(pair)
     # change NA to NULL
@@ -1499,7 +1518,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
         })
     }, mc.cores = cores, mc.preschedule = TRUE)
 
-	metadata_tbls = rbindlist(list_metadata)
+	metadata_tbls = rbindlist(list_metadata, fill = TRUE)
 	cohort$inputs = Skilift::merge.repl(cohort$inputs, metadata_tbls, by = "pair", prefer_x = TRUE, prefer_y = FALSE)
 
     # invisible(NULL)
@@ -1538,9 +1557,35 @@ lift_datafiles_json <- function(output_data_dir, cores = 1) {
   }
   
   # Read each JSON file and combine them into a list
-  combined_data <- mclapply(metadata_files, function(file) {
-    unbox(jsonlite::fromJSON(file))
-  }, mc.cores = cores)
+combined_data <- mclapply(metadata_files, function(file) {
+    
+    if (!file.exists(file)) {
+        warning(sprintf("File does not exist: %s", file))
+        return(NULL)
+    }
+    
+    if (!file.access(file, 4) == 0) {
+        warning(sprintf("File is not readable: %s", file))
+        return(NULL)
+    }
+    
+    if (!grepl("\\.json$", file, ignore.case = TRUE)) {
+        warning(sprintf("File is not a JSON file: %s", file))
+        return(NULL)
+    }
+    
+    file_info <- file.info(file)
+    if (is.na(file_info$size) || file_info$size == 0) {
+        warning(sprintf("JSON file is empty: %s", file))
+        return(NULL)
+    }
+    json_content <- jsonlite::fromJSON(file)
+    return(jsonlite::unbox(json_content))
+    
+}, mc.cores = cores)
+
+# Remove NULL entries from failed reads
+combined_data <- combined_data[!sapply(combined_data, is.null)]
 
   # Write the combined JSON list to "datafiles.json" in the data directory
   output_file <- file.path(output_data_dir, "datafiles.json")
