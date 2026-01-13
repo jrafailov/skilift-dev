@@ -471,10 +471,14 @@ process_qc_metrics2 <- function(
     }
 
     get_metrics = function(path, cols, pair = "pair") {
+        # Handle NA, NULL, and empty values gracefully
+        if (is.null(path) || (length(path) == 1 && is.na(path))) {
+            return(data.table::data.table(pair = pair))
+        }
+        
         nr = NROW(path)
         is_character = is.character(path)
-        is_any_na = any(is.na(path))
-        is_invalid = is_character && (! nr == 1 || is_any_na)
+        is_invalid = is_character && ! nr == 1
         if (is_invalid) stop(path, ": invalid path!")
         if (!test_file_is_present(path)) return(data.table::data.table(pair = pair))
         fcon = file(path, "r")
@@ -1679,18 +1683,20 @@ create_metadata <- function(
     denoised_coverage_field = "foreground",
     is_visible = TRUE,
 	summary = NULL,
+    conpair_contamination = NULL,
+    conpair_concordance = NULL,
     cohort_type = NULL
 ) {
-
+    
     # Initialize metadata with all possible columns
     metadata <- initialize_metadata_columns(pair)
     # change NA to NULL
     fix_entries = c("tumor_type", "disease", "primary_site", "inferred_sex", "jabba_gg", "events", "somatic_snvs", "germline_snvs", "tumor_coverage", "estimate_library_complexity", "alignment_summary_metrics", "insert_size_metrics", "wgs_metrics", "het_pileups", "activities_indel_signatures", "decomposed_indel_signatures", "matrix_indel_signatures", "deconstructsigs_sbs_signatures", "activities_sbs_signatures", "decomposed_sbs_signatures","matrix_sbs_signatures","hrdetect", "onenesstwoness", "msisensorpro", "denoised_coverage_field", "summary")
-    for (x in fix_entries) {
+    invisible(lapply(fix_entries, function(x) {
         if (!exists(x) || is.null(get(x)) || is.na(get(x))) {
-            assign(x, NULL)
+            assign(x, NULL, envir = parent.frame())
         }
-    }    
+    }))
 
     # Add each component sequentially
     metadata <- add_basic_metadata(metadata, tumor_type, tumor_details, disease, primary_site)
@@ -1777,9 +1783,9 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
     # Define all possible columns
     all_cols <- c(
         "pair", "tumor_type", "tumor_details", "disease", "primary_site", "inferred_sex",
-        # "jabba_gg", 
-		jabba_column,
-		"events", "oncokb_snv", "somatic_snvs", "germline_snvs", "tumor_coverage",
+        # "jabba_gg",
+        jabba_column,
+        "events", "oncokb_snv", "somatic_snvs", "germline_snvs", "tumor_coverage",
         "estimate_library_complexity", "alignment_summary_metrics",
         "insert_size_metrics", "tumor_wgs_metrics", "normal_wgs_metrics",
         "het_pileups", "activities_sbs_signatures", "activities_indel_signatures",
@@ -1805,7 +1811,7 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
     cohort_type = cohort$type
     # Process each sample in parallel
     list_metadata = mclapply(seq_len(nrow(lift_inputs)), function(i) {
-        row <- lift_inputs[i,]
+        row <- lift_inputs[i, ]
         pair_dir <- file.path(output_data_dir, row$pair)
         
         if (!dir.exists(pair_dir)) {
@@ -1815,104 +1821,106 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
         out_file <- file.path(pair_dir, "metadata.json")
 
         # prefer oncokb_snv over somatic_snvs if available
-        is_oncokb_present = !is.null(row$oncokb_snv) && !is.na(row$oncokb_snv)
+
+        is_oncokb_present = !is.null(row$oncokb_snv) && !is.na(row$oncokb_snv) && file.exists(row$oncokb_snv)
         snvs_column = row$somatic_snvs
         if (is_oncokb_present) {
             snvs_column = row$oncokb_snv
         }
-		
-		inferred_sex_field = row$inferred_sex
 
-		purple_qc_path_for_fread = row$purple_qc
-		is_purple_qc_null = is.null(purple_qc_path_for_fread) 
-		is_purple_pp_range_null = is.null(row$purple_pp_range)
-		extracted_purple_qc_path = character(0)
-		if (!is_purple_pp_range_null) {
-			extracted_purple_qc_path = dir(dirname(as.character(row$purple_pp_range)), full.names = TRUE, pattern = ".qc$")
-		}
-		if (is_purple_qc_null && NROW(extracted_purple_qc_path) > 0) {
-			purple_qc_path_for_fread = extracted_purple_qc_path[1]
-		}
-		
-		is_purple_qc_path_valid = NROW(purple_qc_path_for_fread) == 1 && is.character(purple_qc_path_for_fread) && file.exists(purple_qc_path_for_fread)
-		if (is_purple_qc_path_valid) {
-			inferred_sex_field = fread(purple_qc_path_for_fread, header = FALSE)[V1 == "AmberGender"]$V2
-			inferred_sex_field = tools::toTitleCase(tolower(inferred_sex_field))
-		}
-        
+        inferred_sex_field = row$inferred_sex
+
+        purple_qc_path_for_fread = row$purple_qc
+        is_purple_qc_null = is.null(purple_qc_path_for_fread)
+        is_purple_pp_range_null = is.null(row$purple_pp_range)
+        extracted_purple_qc_path = character(0)
+        if (!is_purple_pp_range_null) {
+            extracted_purple_qc_path = dir(dirname(as.character(row$purple_pp_range)), full.names = TRUE, pattern = ".qc$")
+        }
+        if (is_purple_qc_null && NROW(extracted_purple_qc_path) > 0) {
+            purple_qc_path_for_fread = extracted_purple_qc_path[1]
+        }
+
+        is_purple_qc_path_valid = NROW(purple_qc_path_for_fread) == 1 && is.character(purple_qc_path_for_fread) && file.exists(purple_qc_path_for_fread)
+        if (is_purple_qc_path_valid) {
+            inferred_sex_field = fread(purple_qc_path_for_fread, header = FALSE)[V1 == "AmberGender"]$V2
+            inferred_sex_field = tools::toTitleCase(tolower(inferred_sex_field))
+        }
+
         futile.logger::flog.threshold("ERROR")
-        tryCatchLog({
+        tryCatchLog(
+            {
+                # Create metadata object
 
-            # Create metadata object
+                metadata <- create_metadata(
+                    pair = row$pair,
+                    tumor_type = row$tumor_type,
+                    tumor_details = row$tumor_details,
+                    disease = row$disease,
+                    primary_site = row$primary_site,
+                    inferred_sex = inferred_sex_field,
+                    purple_pp_bestFit = row$purple_pp_bestFit,
+                    jabba_gg = row[[jabba_column]],
+                    events = row$events,
+                    somatic_snvs = snvs_column,
+                    germline_snvs = row$germline_snvs,
+                    foreground_col_name = row$denoised_coverage_field,
+                    tumor_coverage = row$tumor_coverage,
+                    estimate_library_complexity = row$estimate_library_complexity,
+                    alignment_summary_metrics = row$alignment_summary_metrics,
+                    insert_size_metrics = row$insert_size_metrics,
+                    tumor_wgs_metrics = row$tumor_wgs_metrics,
+                    normal_wgs_metrics = row$normal_wgs_metrics,
+                    het_pileups = row$het_pileups,
+                    activities_sbs_signatures = row$activities_sbs_signatures,
+                    activities_indel_signatures = row$activities_indel_signatures,
+                    decomposed_sbs_signatures = row$decomposed_sbs_signatures,
+                    decomposed_indel_signatures = row$decomposed_indel_signatures,
+                    matrix_indel_signatures = row$matrix_indel_signatures,
+                    matrix_sbs_signatures = row$matrix_sbs_signatures,
+                    hrdetect = row$hrdetect,
+                    onenesstwoness = row$onenesstwoness,
+                    msisensorpro = row$msisensorpro,
+                    seqnames_genome_width_or_genome_length = genome_length,
+                    denoised_coverage_field = row$denoised_coverage_field,
+                    is_visible = row$metadata_is_visible,
+                    summary = row$string_summary,
+                    cohort_type = cohort_type
+                )
 
-            metadata <- create_metadata(
-                pair = row$pair,
-                tumor_type = row$tumor_type,
-                tumor_details = row$tumor_details,
-                disease = row$disease,
-                primary_site = row$primary_site,
-                inferred_sex = inferred_sex_field,
-                purple_pp_bestFit = row$purple_pp_bestFit,
-                jabba_gg = row[[jabba_column]],
-                events = row$events,
-                somatic_snvs = snvs_column,
-                germline_snvs = row$germline_snvs,
-                foreground_col_name = row$denoised_coverage_field,
-                tumor_coverage = row$tumor_coverage,
-                estimate_library_complexity = row$estimate_library_complexity,
-                alignment_summary_metrics = row$alignment_summary_metrics,
-                insert_size_metrics = row$insert_size_metrics,
-                tumor_wgs_metrics = row$tumor_wgs_metrics,
-                normal_wgs_metrics = row$normal_wgs_metrics,
-                het_pileups = row$het_pileups,
-                activities_sbs_signatures = row$activities_sbs_signatures,
-                activities_indel_signatures = row$activities_indel_signatures,
-                decomposed_sbs_signatures = row$decomposed_sbs_signatures,
-                decomposed_indel_signatures = row$decomposed_indel_signatures,
-                matrix_indel_signatures = row$matrix_indel_signatures,
-                matrix_sbs_signatures = row$matrix_sbs_signatures,
-                hrdetect = row$hrdetect,
-                onenesstwoness = row$onenesstwoness,
-                msisensorpro = row$msisensorpro,
-                seqnames_genome_width_or_genome_length = genome_length,
-                denoised_coverage_field = row$denoised_coverage_field,
-                is_visible = row$metadata_is_visible,
-				summary = row$string_summary,
-                cohort_type = cohort_type
-            )
+                if (is.null(metadata)) {
+                    print(sprintf("No metadata generated for %s", row$pair))
+                    return()
+                }
 
-            if (is.null(metadata)) {
-                print(sprintf("No metadata generated for %s", row$pair))
-                return()
+                # Write to JSON
+                jsonlite::write_json(
+                    metadata,
+                    out_file,
+                    auto_unbox = TRUE,
+                    pretty = TRUE,
+                    null = "null"
+                )
+
+                return(metadata)
+            },
+            error = function(e) {
+                print(sprintf("Error processing %s: %s", row$pair, e$message))
+                NULL
             }
-            
-            # Write to JSON
-            jsonlite::write_json(
-                metadata,
-                out_file,
-                auto_unbox = TRUE,
-                pretty = TRUE,
-                null = "null"
-            )
-
-			return(metadata)
-            
-        }, error = function(e) {
-            print(sprintf("Error processing %s: %s", row$pair, e$message))
-            NULL
-        })
+        )
     }, mc.cores = cores, mc.preschedule = TRUE)
 
-	metadata_tbls = rbindlist(list_metadata, fill = TRUE)
-	cohort$inputs = Skilift::merge.repl(cohort$inputs, metadata_tbls, by = "pair", prefer_x = TRUE, prefer_y = FALSE)
+    metadata_tbls = rbindlist(list_metadata, fill = TRUE)
+    cohort$inputs = Skilift::merge.repl(cohort$inputs, metadata_tbls, by = "pair", prefer_x = TRUE, prefer_y = FALSE)
 
     # invisible(NULL)
 
     do_lift_datafiles_json = identical(do_lift_datafiles_json, TRUE)
 
-    if (do_lift_datafiles_json && TRUE) ## excessive checking to make sure nothing dumb happens
+    if (do_lift_datafiles_json && TRUE) { ## excessive checking to make sure nothing dumb happens
         Skilift::lift_datafiles_json(output_data_dir = output_data_dir, cores = cores)
-    
+    }
 	return(cohort)
 }
 
@@ -1976,6 +1984,9 @@ combined_data <- combined_data[!sapply(combined_data, is.null)]
   output_file <- file.path(output_data_dir, "datafiles.json")
   jsonlite::write_json(combined_data, output_file, auto_unbox = TRUE, pretty = TRUE, null = "null")
 
+  browser()
+  debug(convert_json_to_arrow)
+
   invisible(convert_json_to_arrow(output_file))
   
 }
@@ -2022,25 +2033,29 @@ convert_json_to_arrow <- function(json_file_path, arrow_file_path = NULL) {
     })
   }
 
-  # Pre-process list columns that might cause issues with Arrow type inference
-  for (col_name in names(data)) {
-    # Only process actual list-columns, not columns that are themselves data.frames
-    if (is.list(data[[col_name]]) && !is.data.frame(data[[col_name]])) {
-      is_simple_empty <- function(el) {
-        is.null(el) ||
-        (is.atomic(el) && length(el) == 0) ||
-        (is.list(el) && !is.data.frame(el) && length(el) == 0)
-      }
-      
-      all_elements_empty <- all(sapply(data[[col_name]], is_simple_empty))
-      
-      if (all_elements_empty) {
-        cat(paste("Transforming column:", col_name, "to a vector of NA_character_ because all its elements were simple_empty.\n"))
-        # Convert to a simple vector of NA_character_ of the correct length
-        data[[col_name]] <- rep(NA_character_, length(data[[col_name]]))
-      }
+    # Pre-process list columns that might cause issues with Arrow type inference
+    list_cols <- names(data)[sapply(data, function(x) is.list(x) && !is.data.frame(x))]
+
+    if (length(list_cols) > 0) {
+        is_simple_empty <- function(el) {
+            is.null(el) ||
+            (is.atomic(el) && length(el) == 0) ||
+            (is.list(el) && !is.data.frame(el) && length(el) == 0)
+        }
+        
+        empty_list_cols <- list_cols[sapply(list_cols, function(col_name) {
+            all(sapply(data[[col_name]], is_simple_empty))
+        })]
+        
+        if (length(empty_list_cols) > 0) {
+            cat(paste("Transforming columns:", paste(empty_list_cols, collapse = ", "), 
+                                "to vectors of NA_character_ because all their elements were simple_empty.\n"))
+            
+            data[empty_list_cols] <- lapply(data[empty_list_cols], function(x) {
+                rep(NA_character_, length(x))
+            })
+        }
     }
-  }
 
   # Write Arrow file
   tryCatch({

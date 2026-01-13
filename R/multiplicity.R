@@ -200,7 +200,13 @@ create_multiplicity <- function(snv_cn, oncokb_snv=NULL, is_germline = FALSE, fi
 
 	mutations.dt <- gr2dt(mutations.gr)
     
-	is_null_oncokb_snv = is.null(oncokb_snv)
+	# Handle NA and invalid values as NULL
+	is_null_oncokb_snv = is.null(oncokb_snv) || (length(oncokb_snv) == 1 && is.na(oncokb_snv)) || 
+	                      (is.character(oncokb_snv) && length(oncokb_snv) == 1 && oncokb_snv %in% c("/dev/null", ""))
+	if (is_null_oncokb_snv) {
+		oncokb_snv = NULL
+	}
+	
 	is_path_character = is.character(oncokb_snv)
 	is_length_one = NROW(oncokb_snv) == 1
 	is_possible_path = is_path_character && is_length_one
@@ -209,7 +215,7 @@ create_multiplicity <- function(snv_cn, oncokb_snv=NULL, is_germline = FALSE, fi
 	is_txt = is_file_exists && grepl("maf$|(c|t)sv$|txt$", oncokb_snv)
 	is_oncokb_snv_empty = TRUE
 
-	if (!is_null_oncokb_snv) {
+	if (!is.null(oncokb_snv)) {
 		message("oncokb_snv provided, processing input")
 		if (is_rds) {
 		oncokb_snv = readRDS(oncokb_snv)
@@ -242,7 +248,7 @@ create_multiplicity <- function(snv_cn, oncokb_snv=NULL, is_germline = FALSE, fi
 		is_oncokb_snv_empty = nrows_oncokb_snv == 0
 	}
 
-	is_show_only_oncokb_irrelevant = is_null_oncokb_snv && identical(show_only_oncokb, TRUE)
+	is_show_only_oncokb_irrelevant = is.null(oncokb_snv) && identical(show_only_oncokb, TRUE)
 
 	if (is_show_only_oncokb_irrelevant) {
 		message("WARNING: show_only_oncokb set to TRUE, but no oncokb provided to show")

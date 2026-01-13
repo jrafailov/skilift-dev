@@ -2,6 +2,7 @@
 % Please edit documentation in R/metadata.R
 \name{add_coverage_metrics}
 \alias{add_coverage_metrics}
+\alias{add_conpair}
 \title{Add Coverage Metrics}
 \usage{
 add_coverage_metrics(
@@ -14,6 +15,8 @@ add_coverage_metrics(
   tumor_wgs_metrics = NULL,
   normal_wgs_metrics = NULL
 )
+
+add_conpair(metadata, conpair_contamination = NULL, conpair_concordance = NULL)
 }
 \arguments{
 \item{metadata}{A data.table containing metadata.}
@@ -32,7 +35,11 @@ add_coverage_metrics(
 }
 \value{
 Updated metadata with coverage metrics added.
+
+Updated metadata with coverage metrics added.
 }
 \description{
+Adds coverage metrics to the metadata based on tumor coverage and QC metrics.
+
 Adds coverage metrics to the metadata based on tumor coverage and QC metrics.
 }

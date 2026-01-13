@@ -7,7 +7,11 @@
 add_signatures(
   metadata,
   activities_sbs_signatures,
+  decomposed_sbs_signatures,
+  matrix_sbs_signatures,
   activities_indel_signatures,
+  decomposed_indel_signatures,
+  matrix_indel_signatures,
   deconstructsigs_sbs_signatures
 )
 }
@@ -16,7 +20,15 @@ add_signatures(
 
 \item{activities_sbs_signatures}{Activities of SBS signatures.}
 
+\item{decomposed_sbs_signatures}{Probabilities of SBS signatures.}
+
+\item{matrix_sbs_signatures}{Matrix of SBS signatures.}
+
 \item{activities_indel_signatures}{Activities of indel signatures.}
+
+\item{decomposed_indel_signatures}{Matrix of indel signatures.}
+
+\item{matrix_indel_signatures}{Matrix of indel signatures.}
 
 \item{deconstructsigs_sbs_signatures}{DeconstructSigs SBS signatures.}
 

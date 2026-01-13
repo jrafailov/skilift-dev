@@ -690,7 +690,7 @@ lift_purple_sunrise_plot <- function(
     cohort,
     output_data_dir, cores = 1, 
     save_pngs = TRUE, 
-    save_html = TRUE, 
+    save_html = FALSE, 
     save_data = TRUE
 ) {
     if (!inherits(cohort, "Cohort")) {
@@ -761,10 +761,10 @@ lift_purple_sunrise_plot <- function(
                 bestGamma <- 2 * (1 - bestPurity) / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
                 bestBeta <- bestPloidy / (bestPurity * bestPloidy + 2 * (1 - bestPurity))
 
-                range[, color := scales::col_numeric(
-                    palette = scico::scico(256, palette = "batlow"),
-                    domain = range(1 - score, na.rm = TRUE)
-                )(1 - score)]
+                range[, color := scico::scico(
+                    n = 100,
+                    palette = "berlin"
+                )[pmax(1, pmin(100, round((1 - score) * 100)))]]
 
                 # Write the processed data to JSON if save_data is TRUE
                 if (save_data) {
@@ -776,7 +776,7 @@ lift_purple_sunrise_plot <- function(
 
                 if (save_html) {
                     if (requireNamespace("Cairo", quietly = TRUE)) {
-                        p_html <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = FALSE)
+                        p_html <- create_purity_ploidy_plot(range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE)
                         save_purple_sunrise_html(p_html, q, out_file_html)
                     }
                 }
@@ -792,21 +792,60 @@ lift_purple_sunrise_plot <- function(
         )
     }, mc.cores = cores, mc.preschedule = TRUE)
 }
-
 create_purity_ploidy_plot <- function(purple_purity_range, bestPloidy, bestPurity, minPurity, maxPurity, minPloidy, maxPloidy, use_geom_rect = TRUE) {
+    # Get top 5 solutions (best score is lowest)
+    # Find local maxima in the purity-ploidy score landscape
+    find_local_minima <- function(dt, score_threshold = 0.9) {
+        # Create a grid for easier neighbor checking
+        dt_grid <- dt[order(purity, ploidy)]
+        
+        # For each point, check if it's lower than its neighbors
+        local_minima <- dt_grid[, {
+            is_local_min <- TRUE
+            current_score <- score
+            current_purity <- purity
+            current_ploidy <- ploidy
+            
+            # Check neighbors in purity-ploidy space
+            neighbors <- dt_grid[abs(purity - current_purity) <= 0.05 & 
+                                abs(ploidy - current_ploidy) <= 0.5 &
+                                !(purity == current_purity & ploidy == current_ploidy)]
+            if (nrow(neighbors) > 0) {
+                # Point is local minimum if its score is lower than all neighbors
+                is_local_min <- all(current_score <= neighbors$score)
+            }
+            
+            list(is_local_min = is_local_min)
+        }, by = .(purity, ploidy, score)]
+        
+        # Filter for actual local minima and apply score threshold
+        local_minima <- local_minima[is_local_min == TRUE & score <= score_threshold]
+        
+        # Sort by score (best first) and take top 5
+        top_solutions <- local_minima[order(score)][1:min(5, nrow(local_minima))]
+        
+        return(top_solutions)
+    }
+
+    top_solutions <- find_local_minima(purple_purity_range)
+    
     if (use_geom_rect) {
         p <- ggplot(purple_purity_range) +
-            geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = color)) +
-            #scale_fill_scico(palette = "batlow", limits = c(0, 1), breaks = c(0, 0.25, 0.5, 0.75, 1), direction = 1, name = "Relative\nScore", guide = "none") +
+            geom_rect(aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax), fill = purple_purity_range$color) +
             geom_point(aes(x = bestPloidy, y = bestPurity), color = "red", size = 5, shape = 4, stroke = 0.5) +
             geom_segment(aes(x = bestPloidy, xend = bestPloidy, y = minPurity - 0.005, yend = maxPurity + 0.005), color = "red", linetype = "dotted") +
             geom_segment(aes(x = minPloidy, xend = maxPloidy, y = bestPurity, yend = bestPurity), color = "red", linetype = "dotted") +
+            # Add numbered solutions 2-5
+            geom_point(data = top_solutions[2:nrow(top_solutions)], aes(x = ploidy, y = purity), color = "red", size = 3) +
+            geom_text(data = top_solutions[2:nrow(top_solutions)], aes(x = ploidy, y = purity, label = seq(2, nrow(top_solutions))), 
+                     color = "white", size = 2.5, fontface = "bold") +
             theme_bw() +
             theme(panel.background = element_rect(fill = "#f0f2f5", color = NA)) +
             scale_y_continuous(limits = c(minPurity - 0.005, maxPurity + 0.005), labels = c(paste0(minPurity * 100, "%"), "25%", "50%", "75%", "100%"), breaks = c(minPurity, 0.25, 0.5, 0.75, 1), expand = c(0, 0)) +
             scale_x_continuous(limits = c(minPloidy, maxPloidy), breaks = seq(minPloidy, maxPloidy, 0.5), labels = seq(minPloidy, maxPloidy, 0.5) %>% as.character(), expand = c(0, 0)) +
             xlab("Ploidy") +
-            ylab("Purity")
+            ylab("Purity") +
+            theme(legend.position = "none")
         } else {
         p <- ggplot(purple_purity_range) +
             geom_raster(aes(x = ploidy, y = purity, fill = color)) +
@@ -814,12 +853,17 @@ create_purity_ploidy_plot <- function(purple_purity_range, bestPloidy, bestPurit
             geom_point(aes(x = bestPloidy, y = bestPurity), color = "red", size = 5, shape = 4, stroke = 0.5) +
             geom_segment(aes(x = bestPloidy, xend = bestPloidy, y = minPurity - 0.005, yend = maxPurity + 0.005), color = "red", linetype = "dotted") +
             geom_segment(aes(x = minPloidy, xend = maxPloidy, y = bestPurity, yend = bestPurity), color = "red", linetype = "dotted") +
+            # Add numbered solutions 2-5
+            geom_point(data = top_solutions[2:nrow(top_solutions)], aes(x = ploidy, y = purity), color = "red", size = 3) +
+            geom_text(data = top_solutions[2:nrow(top_solutions)], aes(x = ploidy, y = purity, label = seq(2, nrow(top_solutions))), 
+                     color = "white", size = 2.5, fontface = "bold") +
             theme_bw() +
             theme(panel.background = element_rect(fill = "#f0f2f5", color = NA)) +
             scale_y_continuous(limits = c(minPurity - 0.005, maxPurity + 0.005), labels = c(paste0(minPurity * 100, "%"), "25%", "50%", "75%", "100%"), breaks = c(minPurity, 0.25, 0.5, 0.75, 1), expand = c(0, 0)) +
             scale_x_continuous(limits = c(minPloidy, maxPloidy), breaks = seq(minPloidy, maxPloidy, 0.5), labels = seq(minPloidy, maxPloidy, 0.5) %>% as.character(), expand = c(0, 0)) +
             xlab("Ploidy") +
-            ylab("Purity")
+            ylab("Purity") +
+            theme(legend.position = "none")
         }
     return(p)
 }
@@ -840,7 +884,8 @@ create_beta_gamma_plot <- function(purple_purity_range, bestBeta, bestGamma) {
         scale_y_continuous(limits = c(minGamma, maxGamma), breaks = seq(minGamma, maxGamma, length.out = 5) %>% round(3)) +
         geom_point(aes(x = bestBeta, y = bestGamma), color = "red", size = 4, shape = 4, stroke = 0.5) +
         xlab("Beta") +
-        ylab("Gamma")
+        ylab("Gamma") +
+        theme(legend.position = "none")
     return(p)
 }
 
@@ -868,8 +913,8 @@ save_purple_sunrise_html <- function(p, q, out_file_html) {
 }
 
 save_purple_sunrise_pngs <- function(p, q, out_file_png, out_file_beta_gamma_png) {
-    ggsave(file = out_file_png, plot = p, width = 6, height = 6, dpi = 1000)
-    ggsave(file = out_file_beta_gamma_png, plot = q, width = 6, height = 6, dpi = 1000)
+    ggsave(file = out_file_png, plot = p, width = 6, height = 6, dpi = 500)
+    ggsave(file = out_file_beta_gamma_png, plot = q, width = 6, height = 6, dpi = 500)
 }
 
 #' Purity Ploidy Plot
@@ -1002,6 +1047,8 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
 
     # Process each sample in parallel
     iterate_function <- function(i) {
+
+        browser()
         row <- cohort$inputs[i, ]
         pair_dir <- file.path(output_data_dir, row$pair)
 
@@ -1010,7 +1057,7 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
         }
 
         # out_file <- file.path(pair_dir, "ppfit.json")
-        png_path <- paste0(normalizePath(pair_dir), "/pp_plot.png")
+        png_path <- paste0(normalizePath(pair_dir), "/purple_sunrise_pp.png")
 
         futile.logger::flog.threshold("ERROR")
         tryCatchLog(
@@ -1026,22 +1073,18 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
                 ploidy <- pp_plot_list$ploidy
                 eqn <- pp_plot_list$eqn
 
+                # Safely extract transformation parameters
+                intercept_val <- if("intercept" %in% names(eqn)) eqn["intercept"] else 0
+                slope_val <- if("slope" %in% names(eqn) && eqn["slope"] != 0) eqn["slope"] else 1
+                
                 pt <- ggplot(pp_plot_data, aes(x = major.cn, y = minor.cn)) +
                     scale_x_continuous(
                         breaks = 0:floor(maxval),
-                        labels = 0:floor(maxval) %>% as.character(),
-                        sec.axis = sec_axis(
-                            trans = ~ (. - eqn["intercept"]) / eqn["slope"], # Trying to keep it as close to Zi's
-                            name = "Major count"
-                        )
+                        labels = 0:floor(maxval) %>% as.character()
                     ) +
                     scale_y_continuous(
                         breaks = 0:floor(maxval),
-                        labels = 0:floor(maxval) %>% as.character(),
-                        sec.axis = sec_axis(
-                            trans = ~ (. - eqn["intercept"]) / eqn["slope"], # Trying to keep it as close to Zi's
-                            name = "Minor count"
-                        )
+                        labels = 0:floor(maxval) %>% as.character()
                     ) +
                     labs(x = "Major CN", y = "Minor CN") +
                     theme_bw() +
@@ -1054,7 +1097,7 @@ lift_pp_plot <- function(cohort, output_data_dir, cores = 1) {
                         axis.text.y = element_text(size = 10, family = "sans")
                     ) +
                     stat_density_2d(
-                        geom = "polygon", contour = TRUE, aes(alpha = 0.5, fill = after_stat(level)),
+                        geom = "polygon", contour = TRUE, aes(fill = after_stat(level)), alpha = 0.5,
                         bins = 10
                     ) +
                     scale_fill_distiller(palette = "Blues", direction = 1) +

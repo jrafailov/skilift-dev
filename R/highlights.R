@@ -729,11 +729,15 @@ create_summary = function(
     flt3_parsed = "ITD: FLT3"
   }
 
-  complex_sv = events_tbl[type == "Complex SV"]
-  if (NROW(complex_sv) > 0) {
-    string_complex = unique(gsub(": [0-9]+", "", complex_sv$Variant))
-    complex_parsed = paste("Complex SV: ", string_complex, sep = "")
-    complex_parsed = naturalsort::naturalsort(complex_parsed)    
+  complex_parsed = ""
+  # Ensure events_tbl is a data.table and has type column
+  if (is.data.frame(events_tbl) && "type" %in% names(events_tbl)) {
+    complex_sv = events_tbl[type == "Complex SV"]
+    if (NROW(complex_sv) > 0) {
+      string_complex = unique(gsub(": [0-9]+", "", complex_sv$Variant))
+      complex_parsed = paste("Complex SV: ", string_complex, sep = "")
+      complex_parsed = naturalsort::naturalsort(complex_parsed)    
+    }
   }
 
 

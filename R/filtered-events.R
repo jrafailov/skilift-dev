@@ -2303,8 +2303,12 @@ merge_oncokb_multiplicity <- function(
         [!duplicated(query.id)]
       )
     }
-  }
-  ovQuery = rbind(ovQuery, missingOvQuery)
+  }   
+  ovQuery = rbind(ovQuery, missingOvQuery)  
+
+  # FIX: Deduplicate ovQuery on query.id to ensure 1:1 mapping with oncokb rows
+  # Keep the first match for each query.id (could also prioritize by canonical transcript if needed)
+  ovQuery = ovQuery[!duplicated(query.id)]
 
   # cols.keep <- c(
   #   "ref", "alt", "ref_denoised", "alt_denoised", "normal.ref", "normal.alt",

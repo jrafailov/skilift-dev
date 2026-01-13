@@ -9,7 +9,7 @@ lift_purple_sunrise_plot(
   output_data_dir,
   cores = 1,
   save_pngs = TRUE,
-  save_html = TRUE,
+  save_html = FALSE,
   save_data = TRUE
 )
 }

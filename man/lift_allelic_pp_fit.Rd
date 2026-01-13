@@ -10,6 +10,7 @@ lift_allelic_pp_fit(
   cores = 1,
   save_png = TRUE,
   save_data = TRUE,
+  binwidth = 10000,
   file.name = "hetsnps_major_minor.png"
 )
 }

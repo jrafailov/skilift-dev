@@ -27,6 +27,10 @@ create_metadata(
   activities_indel_signatures = NULL,
   deconstructsigs_sbs_signatures = NULL,
   activities_sbs_signatures = NULL,
+  decomposed_sbs_signatures = NULL,
+  decomposed_indel_signatures = NULL,
+  matrix_indel_signatures = NULL,
+  matrix_sbs_signatures = NULL,
   hrdetect = NULL,
   onenesstwoness = NULL,
   msisensorpro = NULL,
@@ -37,6 +41,8 @@ create_metadata(
   denoised_coverage_field = "foreground",
   is_visible = TRUE,
   summary = NULL,
+  conpair_contamination = NULL,
+  conpair_concordance = NULL,
   cohort_type = NULL
 )
 }
@@ -45,7 +51,7 @@ create_metadata(
 
 \item{tumor_type}{The type of tumor.}
 
-\item{tumor_details}{Additional details about the tumor.}
+\item{tumor_details}{Details about the tumor.}
 
 \item{disease}{The disease associated with the sample.}
 
@@ -71,7 +77,19 @@ create_metadata(
 
 \item{het_pileups}{Heterozygous pileups data.}
 
+\item{activities_indel_signatures}{Activities of indel signatures.}
+
+\item{deconstructsigs_sbs_signatures}{DeconstructSigs SBS signatures.}
+
 \item{activities_sbs_signatures}{Activities of SBS signatures.}
+
+\item{decomposed_sbs_signatures}{Decomposed SBS signatures.}
+
+\item{decomposed_indel_signatures}{Decomposed indel signatures.}
+
+\item{matrix_indel_signatures}{Matrix of indel signatures.}
+
+\item{matrix_sbs_signatures}{Matrix of SBS signatures.}
 
 \item{hrdetect}{HRDetect scores.}
 
@@ -88,10 +106,6 @@ create_metadata(
 \item{wgs_metrics}{Path to the wgs_metrics file.}
 
 \item{signatures_pair_name}{The name of the signature pair.}
-
-\item{matrix_indel_signatures}{Matrix of indel signatures.}
-
-\item{matrix_sbs_signatures}{Matrix of SBS signatures.}
 }
 \value{
 A data.table containing the metadata for a single sample pair.

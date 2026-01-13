@@ -17,7 +17,7 @@ add_basic_metadata(
 
 \item{tumor_type}{The type of tumor.}
 
-\item{tumor_details}{Additional details of the tumor.}
+\item{tumor_details}{Details about the tumor.}
 
 \item{disease}{The disease associated with the sample.}
 

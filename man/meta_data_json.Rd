@@ -51,7 +51,7 @@ meta_data_json(
 
 \item{sage_vcf}{path to SAGE vcf to get snv count (sage preferred over strelka2)}
 
-\item{tumor_details}{additional details about the tumor}
+\item{tumor_details}{tumor details of the sample}
 
 \item{disease}{full length tumor type}
 
