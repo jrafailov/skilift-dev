@@ -24,12 +24,12 @@ create_metadata(
   tumor_wgs_metrics = NULL,
   normal_wgs_metrics = NULL,
   het_pileups = NULL,
-  activities_indel_signatures = NULL,
-  deconstructsigs_sbs_signatures = NULL,
-  activities_sbs_signatures = NULL,
-  decomposed_sbs_signatures = NULL,
   decomposed_indel_signatures = NULL,
+  activities_indel_signatures = NULL,
   matrix_indel_signatures = NULL,
+  deconstructsigs_sbs_signatures = NULL,
+  decomposed_sbs_signatures = NULL,
+  activities_sbs_signatures = NULL,
   matrix_sbs_signatures = NULL,
   hrdetect = NULL,
   onenesstwoness = NULL,
@@ -43,7 +43,9 @@ create_metadata(
   summary = NULL,
   conpair_contamination = NULL,
   conpair_concordance = NULL,
-  cohort_type = NULL
+  cohort_type = NULL,
+  qc_flags_config = NULL,
+  added_field_values = NULL
 )
 }
 \arguments{
@@ -77,17 +79,17 @@ create_metadata(
 
 \item{het_pileups}{Heterozygous pileups data.}
 
+\item{decomposed_indel_signatures}{Decomposed indel signatures.}
+
 \item{activities_indel_signatures}{Activities of indel signatures.}
+
+\item{matrix_indel_signatures}{Matrix of indel signatures.}
 
 \item{deconstructsigs_sbs_signatures}{DeconstructSigs SBS signatures.}
 
-\item{activities_sbs_signatures}{Activities of SBS signatures.}
-
 \item{decomposed_sbs_signatures}{Decomposed SBS signatures.}
 
-\item{decomposed_indel_signatures}{Decomposed indel signatures.}
-
-\item{matrix_indel_signatures}{Matrix of indel signatures.}
+\item{activities_sbs_signatures}{Activities of SBS signatures.}
 
 \item{matrix_sbs_signatures}{Matrix of SBS signatures.}
 

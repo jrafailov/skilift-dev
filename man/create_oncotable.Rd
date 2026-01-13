@@ -10,7 +10,8 @@ create_oncotable(
   gencode = Skilift::get_default_gencode(),
   cytoband = system.file("extdata", "data", "cytoband.rds", package = "Skilift"),
   outdir,
-  cores = 1
+  cores = 1,
+  somatic_variant_annotations_fields = Skilift:::echtvar_vcf_fields
 )
 }
 \arguments{

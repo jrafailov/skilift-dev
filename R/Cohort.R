@@ -85,6 +85,89 @@ set_jabba_column = function(column) {
 	return(column)
 }
 
+merge_tumor_type = function(cohort, gs4_auth_path = NULL) {
+  cohort_inputs = cohort
+  is_cohort_r6_object = inherits(cohort, "R6") && inherits(cohort, "Cohort")
+  if (is_cohort_r6_object) {
+    cohort_inputs = cohort$inputs
+  }
+  gs4_auth_path_opt = getOption("gs4_auth_path")
+  is_present_opt = !is.null(gs4_auth_path_opt)
+  gs4_auth_path_env = Sys.getenv("GS4_AUTH_PATH")
+  is_present_env = !(identical(gs4_auth_path_env, "") || identical(gs4_auth_path_env, character(0)))
+  gs4_auth_path_arg = gs4_auth_path
+  is_present_arg = (
+    is.character(gs4_auth_path_arg) 
+    && NROW(gs4_auth_path_arg) == 1 
+    && all(!is.na(gs4_auth_path_arg)) 
+    && file.exists(gs4_auth_path_arg)
+  )
+  tumor_type_db = NULL
+  proceed_with_tumor_type_mapping = is_present_opt || is_present_env || is_present_arg
+  if (proceed_with_tumor_type_mapping) {
+    watchmaker_sequencing_tumor_types = "https://docs.google.com/spreadsheets/d/18BKzuuMS50X6jTAqJv1nAJPOWlp0Jn_jHQUx3wN4M4k/edit?usp=sharing"
+    if (is_present_env) gs4_auth_path = gs4_auth_path_env
+    if (is_present_opt) gs4_auth_path = gs4_auth_path_opt
+    if (is_present_arg) gs4_auth_path = gs4_auth_path_arg
+    googlesheets4::gs4_auth(path = gs4_auth_path)
+    tumor_type_db = tryCatch(
+      {
+        googlesheets4::read_sheet(watchmaker_sequencing_tumor_types, "Samples")
+      },
+      error = function(e) {
+        message("Could not authenticate with googlesheets4 using provided service account - will not match tumor type to internal DB")
+        # message("Error: ", e$message)
+        return(NULL)
+      }
+    )
+    tumor_type_db = data.table::as.data.table(tumor_type_db)
+  } else {
+    
+    message("No googlesheets4 authentication method provided - will not match tumor type to internal DB")
+    message("googlesheets4 authentication can be provided as flag to Skilift$Cohort$new(..., gs4_auth_path='/path/to/google-cloud-service-account.json') or via `options(gs4_auth_path = '/path/to/google-cloud-service-account.json')` or read in as an environment variable `GS4_AUTH_PATH=/path/to/google-cloud-service-account.json')`")
+  }
+  # googlesheets4::gs4_auth(path = "~/.secrets/solar-semiotics-469520-b8-ae032496e3f0.json")
+
+    if (!is.null(tumor_type_db)) {
+      tumor_type_db[["tumor_sample"]] = tumor_type_db[["Tumor_WG_Number"]]
+      otumor_sample = gsub(
+        "___.*", "", 
+        cohort_inputs[["tumor_sample"]]
+      )
+      otumor_sample = gsub("(WG-[0-9]+-[0-9]+)[[:punct:]]+.*", "\\1", otumor_sample, perl = TRUE)
+      ## Taking care of the frickin wetlab suffixes
+      otumor_sample = (
+        gsub("-[0-9]+m", "", otumor_sample)
+        %>% gsub("-PCR_Free", "", .)
+        %>% gsub("-NEB", "", .)
+        %>% gsub("_HB", "", .)
+        %>% gsub("-HB", "", .)
+        %>% gsub("_sonicated", "", .)
+        %>% gsub("(F|S)$", "", .)
+        %>% gsub("(_plus.*MBN.*)$", "", .)
+        %>% gsub("(-(mid|after))$", "", .)    
+      )
+      cohort_inputs$otumor_sample = otumor_sample
+      cohort_inputs = Skilift::merge.repl(
+        cohort_inputs,
+        # tumor_type_db[, .(tumor_sample = Tumor_WG_Number, tumor_type = Tumor_Type, tumor_group = Tumor_Group)]
+        tumor_type_db
+        ,
+        prefer_y = TRUE,
+        by.x = "otumor_sample",
+        by.y = "tumor_sample",
+        allow.cartesian = TRUE
+      )
+      cohort_inputs[["tumor_type"]] = cohort_inputs[["Tumor_Type"]]
+  }
+  if (is_cohort_r6_object) {
+    cohort$inputs = cohort_inputs
+  } else {
+    cohort = cohort_inputs
+  }
+  return(cohort)
+}
+
 #' @export
 Cohort <- R6Class("Cohort",
   public = list(
@@ -231,69 +314,81 @@ Cohort <- R6Class("Cohort",
 
     ## Service account json
 
-    merge_tumor_type = function(self) {
-      gs4_auth_path_opt = getOption("gs4_auth_path")
-      is_present_opt = !is.null(gs4_auth_path_opt)
-      gs4_auth_path_env = Sys.getenv("GS4_AUTH_PATH")
-      is_present_env = !(identical(gs4_auth_path_env, "") || identical(gs4_auth_path_env, character(0)))
-      gs4_auth_path_arg = gs4_auth_path
-      is_present_arg = (
-        is.character(gs4_auth_path_arg) 
-        && NROW(gs4_auth_path_arg) == 1 
-        && all(!is.na(gs4_auth_path_arg)) 
-        && file.exists(gs4_auth_path_arg)
-      )
-        tumor_type_db = NULL
-      proceed_with_tumor_type_mapping = is_present_opt || is_present_env || is_present_arg
-      if (proceed_with_tumor_type_mapping) {
-        watchmaker_sequencing_tumor_types = "https://docs.google.com/spreadsheets/d/18BKzuuMS50X6jTAqJv1nAJPOWlp0Jn_jHQUx3wN4M4k/edit?usp=sharing"
-        if (is_present_env) gs4_auth_path = gs4_auth_path_env
-        if (is_present_opt) gs4_auth_path = gs4_auth_path_opt
-        if (is_present_arg) gs4_auth_path = gs4_auth_path_arg
-        googlesheets4::gs4_auth(path = gs4_auth_path)
-        tumor_type_db = tryCatch(
-          {
-            googlesheets4::read_sheet(watchmaker_sequencing_tumor_types, "Samples")
-          },
-          error = function(e) {
-            message("Could not authenticate with googlesheets4 using provided service account - will not match tumor type to internal DB")
-            # message("Error: ", e$message)
-            return(NULL)
-          }
-        )
-        tumor_type_db = data.table::as.data.table(tumor_type_db)
-      } else {
+    # merge_tumor_type = function(self) {
+    #   gs4_auth_path_opt = getOption("gs4_auth_path")
+    #   is_present_opt = !is.null(gs4_auth_path_opt)
+    #   gs4_auth_path_env = Sys.getenv("GS4_AUTH_PATH")
+    #   is_present_env = !(identical(gs4_auth_path_env, "") || identical(gs4_auth_path_env, character(0)))
+    #   gs4_auth_path_arg = gs4_auth_path
+    #   is_present_arg = (
+    #     is.character(gs4_auth_path_arg) 
+    #     && NROW(gs4_auth_path_arg) == 1 
+    #     && all(!is.na(gs4_auth_path_arg)) 
+    #     && file.exists(gs4_auth_path_arg)
+    #   )
+    #   tumor_type_db = NULL
+    #   proceed_with_tumor_type_mapping = is_present_opt || is_present_env || is_present_arg
+    #   if (proceed_with_tumor_type_mapping) {
+    #     watchmaker_sequencing_tumor_types = "https://docs.google.com/spreadsheets/d/18BKzuuMS50X6jTAqJv1nAJPOWlp0Jn_jHQUx3wN4M4k/edit?usp=sharing"
+    #     if (is_present_env) gs4_auth_path = gs4_auth_path_env
+    #     if (is_present_opt) gs4_auth_path = gs4_auth_path_opt
+    #     if (is_present_arg) gs4_auth_path = gs4_auth_path_arg
+    #     googlesheets4::gs4_auth(path = gs4_auth_path)
+    #     tumor_type_db = tryCatch(
+    #       {
+    #         googlesheets4::read_sheet(watchmaker_sequencing_tumor_types, "Samples")
+    #       },
+    #       error = function(e) {
+    #         message("Could not authenticate with googlesheets4 using provided service account - will not match tumor type to internal DB")
+    #         # message("Error: ", e$message)
+    #         return(NULL)
+    #       }
+    #     )
+    #     tumor_type_db = data.table::as.data.table(tumor_type_db)
+    #   } else {
         
-        message("No googlesheets4 authentication method provided - will not match tumor type to internal DB")
-        message("googlesheets4 authentication can be provided as flag to Skilift$Cohort$new(..., gs4_auth_path='/path/to/google-cloud-service-account.json') or via `options(gs4_auth_path = '/path/to/google-cloud-service-account.json')` or read in as an environment variable `GS4_AUTH_PATH=/path/to/google-cloud-service-account.json')`")
-      }
-      # googlesheets4::gs4_auth(path = "~/.secrets/solar-semiotics-469520-b8-ae032496e3f0.json")
+    #     message("No googlesheets4 authentication method provided - will not match tumor type to internal DB")
+    #     message("googlesheets4 authentication can be provided as flag to Skilift$Cohort$new(..., gs4_auth_path='/path/to/google-cloud-service-account.json') or via `options(gs4_auth_path = '/path/to/google-cloud-service-account.json')` or read in as an environment variable `GS4_AUTH_PATH=/path/to/google-cloud-service-account.json')`")
+    #   }
+    #   # googlesheets4::gs4_auth(path = "~/.secrets/solar-semiotics-469520-b8-ae032496e3f0.json")
 
-        if (!is.null(tumor_type_db)) {
-          tumor_type_db$tumor_sample = tumor_type_db$Tumor_WG_Number
-          otumor_sample = gsub(
-            "___.*", "", 
-            self$inputs$tumor_sample
-          )
-          otumor_sample = gsub("(WG-[0-9]+-[0-9]+)[[:punct:]]+.*", "\\1", otumor_sample, perl = TRUE)
-          self$inputs$otumor_sample = otumor_sample
-          self$inputs = Skilift::merge.repl(
-            self$inputs,
-            # tumor_type_db[, .(tumor_sample = Tumor_WG_Number, tumor_type = Tumor_Type, tumor_group = Tumor_Group)]
-            tumor_type_db
-            ,
-            prefer_y = TRUE,
-            by.x = "otumor_sample",
-            by.y = "tumor_sample",
-            allow.cartesian = TRUE
-          )
-          self$inputs$tumor_type = self$inputs$Tumor_Type
-      }
-      return(self)
-    }
+    #     if (!is.null(tumor_type_db)) {
+    #       tumor_type_db$tumor_sample = tumor_type_db$Tumor_WG_Number
+    #       otumor_sample = gsub(
+    #         "___.*", "", 
+    #         self$inputs$tumor_sample
+    #       )
+    #       otumor_sample = gsub("(WG-[0-9]+-[0-9]+)[[:punct:]]+.*", "\\1", otumor_sample, perl = TRUE)
+    #       ## Taking care of the frickin wetlab suffixes
+    #       otumor_sample = (
+    #         gsub("-[0-9]+m", "", otumor_sample)
+    #         %>% gsub("-PCR_Free", "", .)
+    #         %>% gsub("-NEB", "", .)
+    #         %>% gsub("_HB", "", .)
+    #         %>% gsub("-HB", "", .)
+    #         %>% gsub("_sonicated", "", .)
+    #         %>% gsub("(F|S)$", "", .)
+    #         %>% gsub("(_plus.*MBN.*)$", "", .)
+    #         %>% gsub("(-(mid|after))$", "", .)    
+    #       )
+    #       self$inputs$otumor_sample = otumor_sample
+    #       self$inputs = Skilift::merge.repl(
+    #         self$inputs,
+    #         # tumor_type_db[, .(tumor_sample = Tumor_WG_Number, tumor_type = Tumor_Type, tumor_group = Tumor_Group)]
+    #         tumor_type_db
+    #         ,
+    #         prefer_y = TRUE,
+    #         by.x = "otumor_sample",
+    #         by.y = "tumor_sample",
+    #         allow.cartesian = TRUE
+    #       )
+    #       self$inputs$tumor_type = self$inputs$Tumor_Type
+    #   }
+    #   return(self)
+    # }
 
     if (merge_tumor_type_db) {
-      self = merge_tumor_type(self)
+      self = merge_tumor_type(cohort = self, gs4_auth_path = gs4_auth_path)
     }
     
 
@@ -696,11 +791,22 @@ Cohort <- R6Class("Cohort",
         } else if (!is.null(default_value) && nrow(dt) > 0) {
           # Only add default values if the input data.table is not empty
           if (is.list(default_value) || length(default_value) > 1) {
-            result_dt[, (cohort_col) := list(replicate(nrow(dt), list(default_value), simplify = FALSE))]
+            value_to_add = replicate(
+              nrow(dt), 
+              list(default_value), 
+              simplify = TRUE
+            )
+            result_dt[["PLACEHOLDER___COLUMN"]] = value_to_add
+            names(result_dt)[
+              names(result_dt) == "PLACEHOLDER___COLUMN"
+            ] = cohort_col
           } else {
             result_dt[, (cohort_col) := default_value]
           }
-        } else if (nrow(dt) > 0 && !cohort_col %in% Skilift:::config_parameter_names) {
+        } else if (
+          nrow(dt) > 0 
+          && !cohort_col %in% Skilift:::config_parameter_names
+        ) {
           warning(sprintf(
             "No matching column found for '%s'. Expected one of: %s",
             cohort_col, paste(possible_cols, collapse = ", ")
@@ -859,6 +965,7 @@ nf_path_patterns <- list(
   oncokb_fusions = "oncokb/.*/merged_oncokb_fusions.tsv"
 )
 
+
 #' Default column mappings
 #'
 #' Defines naming convention cohort inputs table
@@ -879,7 +986,7 @@ default_col_mapping <- list(
   inferred_sex = c("inferred_sex", "sex"),
   tumor_bam = c("tumor_bam", "bam_tumor"),
   normal_bam = c("normal_bam", "bam_normal"),
-  structural_variants = c("structural_variants", "gridss_somatic", "gridss_sv", "svaba_sv", "sv", "svs", "vcf"),
+  structural_variants = c("structural_variants", "gridss_somatic", "gridss_sv", "svaba_sv", "sv", "svs"),
   structural_variants_retiered = c("structural_variants_retiered"),
   structural_variants_unfiltered = "structural_variants_unfiltered",
   structural_variants_raw = "structural_variants_raw",
@@ -894,8 +1001,8 @@ default_col_mapping <- list(
   multiplicity = c("multiplicity", "somatic_snv_cn", "snv_multiplicity"),
   germline_multiplicity = c("germline_multiplicity", "multiplicity_germline", "germline_snv_cn"),
   hetsnps_multiplicity = c("hetsnps_multiplicity", "multiplicity_hetsnps", "hets_snv_cn"),
-  somatic_variant_annotations = c("somatic_variant_annotations", "variant_annotations_somatic", "annotated_bcf", "variant_somatic_ann"),
-  germline_variant_annotations = c("germline_variant_annotations",  "variant_annotations_germline","annotated_vcf_germline"),
+  somatic_variant_annotations = c("somatic_variant_annotations", "variant_annotations_somatic_echtvar", "variant_annotations_somatic", "annotated_bcf", "variant_somatic_ann"),
+  germline_variant_annotations = c("germline_variant_annotations",  "variant_annotations_germline_echtvar", "variant_annotations_germline","annotated_vcf_germline"),
   oncokb_snv = c("oncokb_snv", "oncokb_maf", "maf"),
   oncokb_cna = c("oncokb_cna", "cna"),
   oncokb_fusions = c("oncokb_fusions", "oncokb_fusion", "fusion_maf"),
@@ -957,8 +1064,10 @@ default_col_mapping <- list(
   hetsnps_subsample_size = structure(c("hetsnps_subsample_size"), default = 100000),
   hetsnps_min_normal_freq = structure(c("hetsnps_min_normal_freq"), default = 0.2),
   hetsnps_max_normal_freq = structure(c("hetsnps_max_normal_freq"), default = 0.8),
-  segment_width_distribution_annotations = structure(c("segment_width_distribution_annotations"), default = NULL)
+  segment_width_distribution_annotations = structure(c("segment_width_distribution_annotations"), default = NULL),
+  qc_flags = structure("qc_flags", default = Skilift:::qc_flag_thresholds)
 )
+
 
 #' Configuration parameter names
 #'
@@ -983,7 +1092,8 @@ config_parameter_names <- c(
   "hetsnps_subsample_size",
   "hetsnps_min_normal_freq",
   "hetsnps_max_normal_freq",
-  "segment_width_distribution_annotations"
+  "segment_width_distribution_annotations",
+  "qc_flag_thresholds"
 )
 
 #' Create unified column and nf casereports map
@@ -1336,4 +1446,64 @@ pairify_cohort_inputs = function(cohort, tumor_status = 1L, normal_status = 0L, 
 		)
 	}
 	return(return_inputs)
+}
+
+
+#' Fill Out Normal
+#' 
+#' Create normal with basic information
+#' 
+#' Need for this arises from gosh output
+#' not always filling out normal paths
+#' if cohort reuses normals across
+#' tumor samples. 
+#' 
+fill_out_normal = {
+  function(
+  cohort,
+  normal_cols = c(
+    "normal_sample", 
+    "normal_bam", 
+    "fragcounter_normal", 
+    "estimate_library_complexity_normal", 
+    "alignment_summary_metrics_normal", 
+    "insert_size_metrics_normal", 
+    "normal_wgs_metrics"
+  )
+) {
+    ENV = environment()
+    is_r6 = inherits(x = cohort, what = c("R6"))
+    is_cohort = inherits(x = cohort, what = c("Cohort"))
+    is_tbl = inherits(x = cohort, what = c("data.frame"))
+    if (is_r6 && is_cohort) {
+      tbl = cohort$inputs
+    } else if (is_tbl) {
+      tbl = cohort
+    } else {
+      stop("wtf")
+    }
+    dtnorm = as.data.table(mget(normal_cols, envir = as.environment(as.list(tbl))))
+    dtnorm = Skilift:::nacharacter(dtnorm)
+    dtnorm_collapsed = dtnorm[, {
+      main = function() {
+        lst = lapply(
+          X = .SD,
+          FUN = function(x) {
+            out = unique(x)
+            return(out[!is.na(out)][1])
+          }
+        )
+        return(lst)
+      }
+      main()
+    }, by = {
+      bymain = function() {
+        list(
+          normal_sample = normal_sample
+          )
+      }
+      bymain()
+    }, .SDcols = normal_cols]
+    return(dtnorm_collapsed)
+  }
 }

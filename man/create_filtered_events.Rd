@@ -10,7 +10,8 @@ create_filtered_events(
   jabba_gg,
   out_file,
   return_table = FALSE,
-  cohort_type = "paired"
+  cohort_type = "paired",
+  additional_columns = NULL
 )
 }
 \arguments{

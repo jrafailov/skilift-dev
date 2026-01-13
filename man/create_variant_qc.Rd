@@ -4,19 +4,29 @@
 \alias{create_variant_qc}
 \title{create_variant_qc}
 \usage{
-create_variant_qc(somatic_snvs, reference_name = "hg19")
+create_variant_qc(
+  oncokb_path,
+  multiplicity_path,
+  sbs_path,
+  indel_path,
+  cohort_type
+)
 }
 \arguments{
-\item{somatic_snvs}{Path to sage VCF file to be used (paired T-N/ Tumor only)}
+\item{oncokb_path}{Path to oncokb maf file to be used}
 
-\item{reference_name}{Reference genome name (e.g., "hg19", "hg38")}
+\item{multiplicity_path}{Path to multiplitcity output}
+
+\item{sbs_path}{Path to posterior probs for sbs signatures}
+
+\item{indel_path}{Path to posterior probs for ID signatures}
 }
 \value{
-data.table containing variant QC metrics
+data.table containing variant QC metrics along with highest signature posterior
 }
 \description{
 Function to create quality control metrics for somatic variants
 }
 \author{
-Shihab Dider, Tanubrata Dey, Stanley Clarke
+Kevin Hadi, Aditya Deshpande
 }

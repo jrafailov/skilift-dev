@@ -185,7 +185,7 @@ collapse_allelic_ggraph = function(gg) {
     dt_collapsed = setDT(as.data.frame(gr_collapsed))
 
     nodeid_firstlast = (
-        gGnome::dunlist(dt_collapsed$revmap)
+        Skilift:::dunlist(dt_collapsed$revmap)
         [, .SD[order(V1)], by = listid]
         [, .(nodeid_left = V1[1], nodeid_right = V1[.N]), keyby = listid]
     )

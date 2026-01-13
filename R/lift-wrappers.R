@@ -56,12 +56,16 @@ has_required_columns <- function(cohort, columns, any = FALSE, verbose = TRUE) {
     purple_sunrise_plot = c("purple_pp_range", "purple_pp_bestFit"),
     pp_plot = c("jabba_gg", "het_pileups"),
     signatures = c(
+      
       "matrix_sbs_signatures",
       "decomposed_sbs_signatures",
       "matrix_indel_signatures",
       "decomposed_indel_signatures"
     ),
-    variant_qc = c("somatic_snvs"),
+    variant_qc = c("oncokb_snv",
+                   "multiplicity",
+                   "indel_post_prob_signatures",
+                   "sbs_post_prob_signatures"),
     metadata = c(
       "tumor_type",
       "tumor_details",

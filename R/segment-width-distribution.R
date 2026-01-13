@@ -1455,18 +1455,37 @@ create_2d_purity_ploidy = function(
     min_cn_het = min(dat_sub[!origin == "somatic"]$mult_cn, na.rm = TRUE)
 
     dat_sub[signif(mult_cn, 3) == signif(min(dat_sub$mult_cn), 3), cn]
+    ## min_cn = min(
+    ##     min(dat_sub$cn, na.rm = TRUE),
+    ##     min(dat_sub$mult_cn, na.rm = TRUE),
+    ##     na.rm = TRUE
+    ## )
     min_cn = min(
-        min(dat_sub$cn, na.rm = TRUE),
-        min(dat_sub$mult_cn, na.rm = TRUE),
+        floor(quantile(dat_sub$cn, 0.05, na.rm = TRUE)),
+        floor(quantile(dat_sub$mult_cn, 0.05, na.rm = TRUE)),
         na.rm = TRUE
     )
+    ## max_cn = max(
+    ##     max(dat_sub$cn, na.rm = TRUE),
+    ##     max(dat_sub$mult_cn, na.rm = TRUE),
+    ##     na.rm = TRUE
+    ## )
     max_cn = max(
-        max(dat_sub$cn, na.rm = TRUE),
-        max(dat_sub$mult_cn, na.rm = TRUE),
+        ceiling(quantile(dat_sub$cn, 0.95, na.rm = TRUE)),
+        ceiling(quantile(dat_sub$mult_cn, 0.95, na.rm = TRUE)),
         na.rm = TRUE
     )
-    cn_range = seq(floor(min_cn), ceiling(max_cn))
-    ## cn_range = 0:cn_max_limit
+    
+    max_cn = min(max_cn, 10)
+    # cn_range = seq(floor(min_cn), ceiling(max_cn))
+
+    cn_floor = floor(min_cn)
+    cn_ceiling = ceiling(max_cn)
+    cn_range_pad = ceiling((cn_ceiling - cn_floor + 1) * 0.2) ## adding a pad
+    cn_range = seq(
+        floor(cn_floor - cn_range_pad),
+        ceiling(cn_ceiling + cn_range_pad)
+    )
 
     nr_cn_range = NROW(cn_range)
 

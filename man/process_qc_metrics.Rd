@@ -2,7 +2,7 @@
 % Please edit documentation in R/metadata.R
 \name{process_qc_metrics}
 \alias{process_qc_metrics}
-\title{Process Quality Control Metrics}
+\title{QC Metrics}
 \usage{
 process_qc_metrics(
   estimate_library_complexity,
@@ -28,5 +28,5 @@ process_qc_metrics(
 A list containing processed QC metrics
 }
 \description{
-Processes quality control metrics from multiple QC files and combines them
+Process QC metrics
 }

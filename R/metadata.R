@@ -235,193 +235,6 @@ extract_metrics <- function(qc_data, metrics, pair) {
     return(result)
 }
 
-#' @name process_qc_metrics
-#' @title Process Quality Control Metrics
-#' @description Processes quality control metrics from multiple QC files and combines them
-#' @param estimate_library_complexity Path to the estimate_library_complexity_metrics file
-#' @param alignment_summary_metrics Path to the alignment_summary_metrics file
-#' @param insert_size_metrics Path to the insert_size_metrics file
-#' @param wgs_metrics Path to the wgs_metrics file
-#' @param pair Sample pair identifier
-#' @return A list containing processed QC metrics
-process_qc_metrics <- function(
-    estimate_library_complexity,
-    alignment_summary_metrics,
-    insert_size_metrics,
-    tumor_wgs_metrics,
-    normal_wgs_metrics,
-    pair
-) {
-
-
-    # Define metric mappings for each file type
-    complexity_metrics_cols <- c(
-        read_pairs_examined = "READ_PAIRS_EXAMINED",
-        read_pair_duplicates = "READ_PAIR_DUPLICATES",
-        read_pair_optical_duplicates = "READ_PAIR_OPTICAL_DUPLICATES",
-        percent_duplication = "PERCENT_DUPLICATION"
-    )
-    
-    alignment_metrics_cols <- c(
-        total_reads = "TOTAL_READS",
-        pf_reads_aligned = "PF_READS_ALIGNED",
-        pf_aligned_bases = "PF_ALIGNED_BASES",
-        mean_read_length = "MEAN_READ_LENGTH"
-    )
-    
-    insert_metrics_cols <- c(
-        # median_insert_size = "MEDIAN_INSERT_SIZE"
-        insert_size = "MEDIAN_INSERT_SIZE"
-    )
-    
-    tumor_wgs_metrics_cols <- c(
-        # median_coverage = "MEAN_COVERAGE"
-        tumor_median_coverage = "MEDIAN_COVERAGE",
-        # pct_30x = "PCT_30X",
-        greater_than_or_equal_to_30x = "PCT_30X",
-        # pct_50x = "PCT_50X"
-        greater_than_or_equal_to_50x = "PCT_50X",
-        fraction_excluded = "PCT_EXC_TOTAL"
-    )
-
-    normal_wgs_metrics_cols <- c(
-        normal_median_coverage = "MEDIAN_COVERAGE",
-        fraction_excluded = "PCT_EXC_TOTAL"
-    )
-    
-    test_file_is_present = function(x) {
-        (
-            !is.null(x)
-            && is.character(x)
-            && NROW(x) == 1
-            && file.exists(x)
-        )
-    }
-
-    # Read and extract metrics from each file
-    complexity_data = data.table(pair = character(0))
-    if (test_file_is_present(estimate_library_complexity)) {
-        complexity_data <- extract_metrics(
-            fread(estimate_library_complexity),
-            complexity_metrics_cols,
-            pair
-        )
-    }
-    
-    alignment_data = data.table(pair = character(0))
-    if (test_file_is_present(alignment_summary_metrics)) {
-        alignment_data <- extract_metrics(
-            fread(alignment_summary_metrics)[CATEGORY=="PAIR"],
-            alignment_metrics_cols,
-            pair
-        )
-    }
-    
-    insert_data = data.table(pair = character(0))
-    if (test_file_is_present(insert_size_metrics)) {
-        insert_data <- extract_metrics(
-            fread(insert_size_metrics)[PAIR_ORIENTATION == "FR"],
-            insert_metrics_cols,
-            pair
-        )
-    }
-
-    tumor_wgs_data = data.table(pair = character(0))
-    if (test_file_is_present(tumor_wgs_metrics)) {
-        tumor_wgs_data <- extract_metrics(
-            fread(tumor_wgs_metrics),
-            tumor_wgs_metrics_cols,
-            pair
-        )
-        tumor_wgs_data$tumor_median_coverage = round(
-            tumor_wgs_data$tumor_median_coverage / (1 - tumor_wgs_data$fraction_excluded)
-        )
-        tumor_wgs_data$fraction_excluded = NULL
-    }
-
-    normal_wgs_data = data.table(pair = character(0))
-    if (test_file_is_present(normal_wgs_metrics)) {
-        normal_wgs_data <- extract_metrics(
-            fread(normal_wgs_metrics),
-            normal_wgs_metrics_cols,
-            pair
-        )
-        normal_wgs_data$normal_median_coverage = round(
-            normal_wgs_data$normal_median_coverage / (1 - normal_wgs_data$fraction_excluded)
-        )
-        normal_wgs_data$fraction_excluded = NULL
-    }
-    
-    # c("pair", "total_reads", "pf_reads_aligned", "pf_aligned_bases", 
-    # "mean_read_length", "median_insert_size", "median_coverage", 
-    # "pct_30x", "pct_50x", "percent_optical_duplication", 
-    # "percent_aligned", "percent_optical_dups_of_dups")
-    # Merge all metrics on pair
-    lst_to_merge = list(
-        complexity_data, 
-        alignment_data, 
-        insert_data, 
-        tumor_wgs_data,
-        normal_wgs_data
-    )
-    qc_metrics <- Reduce(function(x, y) {
-        data.table::merge.data.table(
-            x, y, by = "pair", 
-            all.x = TRUE, 
-            all.y = TRUE,
-            suffixes = c("_x", "_y")
-        )
-    }   , lst_to_merge)
-    
-    # Calculate derivative metrics
-    # Separating out and writing long way for robustness to
-    # missing data.
-    qc_metrics$m_reads = qc_metrics$total_reads / 1e6
-    qc_metrics$m_reads_mapped = qc_metrics$pf_reads_aligned / 1e6
-    qc_metrics$percent_optical_duplication = (
-        qc_metrics$read_pair_optical_duplicates /
-        qc_metrics$read_pairs_examined
-    )
-    qc_metrics$percent_aligned = (
-        qc_metrics$pf_aligned_bases / 
-        ( qc_metrics$total_reads * qc_metrics$mean_read_length )
-    )
-    qc_metrics$percent_optical_dups_of_dups = (
-        qc_metrics$read_pair_optical_duplicates / 
-        qc_metrics$read_pair_duplicates
-    )
-    # # FIXME, need to account for tumor and normal
-    # qc_metrics$normal_median_coverage = NA_integer_
-
-    # Remove any metrics that are NA
-    # This can happen if any derivative metrics
-    # are calculated from qc inputs not provided
-    # in above lines.
-    for (colnm in names(qc_metrics)) {
-        is_all_na = all(is.na(qc_metrics[[colnm]]))
-        if (is_all_na) qc_metrics[[colnm]] = NULL
-    }
-
-    # qc_metrics[, `:=`(
-    #     m_reads = total_reads / 1e6,
-    #     m_reads_mapped = pf_reads_aligned / 1e6,
-    #     percent_optical_duplication = read_pair_optical_duplicates / read_pairs_examined,
-    #     percent_aligned = pf_aligned_bases / (total_reads * mean_read_length),
-    #     percent_optical_dups_of_dups = read_pair_optical_duplicates / read_pair_duplicates
-    # )]
-    
-    return(as.list(qc_metrics))
-}
-
-
-list_of_qc = list(
-    dup_rate = "estimate_library_complexity",
-    tumor_cov = "tumor_wgs_metrics",
-    normal_cov = "normal_wgs_metrics",
-    insert_size = "insert_size_metrics",
-    alignment_summary = "alignment_summary_metrics"
-)
-
 #' QC Metrics
 #' 
 #' Process QC metrics
@@ -432,7 +245,7 @@ list_of_qc = list(
 #' @param wgs_metrics Path to the wgs_metrics file
 #' @param pair Sample pair identifier
 #' @return A list containing processed QC metrics
-process_qc_metrics2 <- function(
+process_qc_metrics <- function(
     estimate_library_complexity,
     alignment_summary_metrics,
     insert_size_metrics,
@@ -466,6 +279,7 @@ process_qc_metrics2 <- function(
             !is.null(x)
             && is.character(x)
             && NROW(x) == 1
+            && !any(is.na(x))
             && file.exists(x)
         )
     }
@@ -478,7 +292,8 @@ process_qc_metrics2 <- function(
         
         nr = NROW(path)
         is_character = is.character(path)
-        is_invalid = is_character && ! nr == 1
+        is_any_na = any(is.na(path))
+        is_invalid = is_character && (! nr == 1 )
         if (is_invalid) stop(path, ": invalid path!")
         if (!test_file_is_present(path)) return(data.table::data.table(pair = pair))
         fcon = file(path, "r")
@@ -635,14 +450,7 @@ process_qc_metrics2 <- function(
     return(as.list(qc_metrics))
 }
 
-qc_flag_thresholds = list(
-    list("FAIL", "greater_than_or_equal_to_50x", `<=`, 0.99, "Fraction of genome covered at 50X","< 99%"),
-    list("WARN", "purity", `<`, 0.2, "Purity", "less than 20%"),
-    list("WARN", "insert_size", `<`, 300, "Insert Size", "less than 300 bp"),
-    list("WARN", "percent_duplication", `>`, 0.3, "Duplicate percent", "greater than than 30%"),
-    list("FAIL", "fraction_of_reads_aligned", `<`, 0.9, "Percent of reads aligned", "less than 90%"),
-    list("FAIL", "conpair_concordance_metric", `<`, 0.9, "Tumor/Normal SNP concordance", "less than 90%")
-)
+
 
 #' QC Flags
 #'
@@ -653,10 +461,15 @@ qc_flag_thresholds = list(
 #' The strings should be parsable into a form
 #' digested in gOS and shown as a single "PASS"/Checkmark", "Warning", or "Fail". 
 #' The actual metrics should show up on hover.
+#' @export
 process_qc_flag = function(
     metadata,
-    qc_flag_thresholds = Skilift:::qc_flag_thresholds
+    qc_flag_thresholds
 ) {
+
+    if (is.null(qc_flag_thresholds)) {
+        qc_flag_thresholds = Skilift:::qc_flag_thresholds
+    }
 
     check_field = function(list_like, field) {
         val1 = list_like[[field]]
@@ -670,46 +483,191 @@ process_qc_flag = function(
     }
 
     flags_lst = list()
+    ops_oppo = c(
+        ">=" = "<",
+        "<=" = ">",
+        ">" = "<=",
+        "<" = ">=",
+        "==" = "!=",
+        "!=" = "=="
+    )
 
     for (tuple in qc_flag_thresholds) {
         flag_title = tuple[[1]]
         field = tuple[[2]]
         fun_comparator = tuple[[3]]
+        fun_comparator_string = gsub("\"", "", as.character(substitute(quote(fun_comparator))))
+        fun_comparator_string = gsub(".Primitive", "", fun_comparator_string, perl = TRUE)
+        fun_comparator_string = gsub("[\\(\\)]", "", fun_comparator_string, perl = TRUE)
+        fun_comparator_string = fun_comparator_string[!fun_comparator_string %in% c("quote", ".Primitive")]
+        if (NROW(fun_comparator_string) != 1) stop("wtf is going on with the comparator string")
         value = tuple[[4]]
         transformed_name = tuple[[5]]
         flag_message = tuple[[6]]
         data_value = check_field(metadata, field)
         is_na = any(is.na(data_value))
         if (is_na) {
-            flags_lst = c(flags_lst, list(paste("Unknown:", transformed_name)))
-            next
+            flag_title = "UNKNOWN"
+            # flags_lst = c(flags_lst, list(paste("UNKNOWN:", transformed_name)))
+            # next
         }
-        is_flagged = fun_comparator(data_value, value)
-        if (!is_flagged) {
+        is_flagged = all(fun_comparator(data_value, value))
+        is_passing = !is_flagged && !is_na
+        # is_flagged = is_flagged && !is_na
+        op_to_show = fun_comparator_string
+        if (is_passing) {
             flag_title = "PASS"
-            flag_message = ""
+            op_to_show = ops_oppo[fun_comparator_string]
         }
+        flag_shown_value = paste(
+            op_to_show,
+            " ",
+            flag_message,
+            sep = ""
+        )
+        key_json = flag_title
+        value_json = paste(
+            transformed_name, 
+            " (", 
+            signif(data_value, 3), 
+            ")", " ",
+            # flag_message,
+            flag_shown_value,
+            sep = ""
+        )
+        if (identical(flag_title, "UNKNOWN")) {
+            value_json = transformed_name
+        }
+        value_json = trimws(value_json)
+        ## record_json = list(
+        ##     paste(
+        ##         flag_title, 
+        ##         ": ", 
+        ##         transformed_name, 
+        ##         " (", 
+        ##         signif(data_value, 3), 
+        ##         ")", " ",
+        ##         flag_message,
+        ##         sep = ""
+        ##     )
+        ## )
+        record_json = list(list("code" = key_json, "title" = value_json))
+        ## names(record_json)[names(record_json) == "key_field___rename"] = key_json
+        ## names(record_json)[names(record_json) == "value_field___rename"] = value_json
         flags_lst = c(
             flags_lst, 
-            list(
-                paste(
-                    flag_title, 
-                    ": ", 
-                    transformed_name, 
-                    " (", 
-                    signif(data_value, 3), 
-                    ")", " ",
-                    flag_message,
-                    sep = ""
-                )
-            )
+            record_json
         )
     }
 
     ## do.call(function(...) paste(..., collapse = "\n"), flags_lst)
-    metadata$qc_flag = paste(trimws(unlist(flags_lst)), collapse = "\n")
+    # metadata$qc_flag = paste(trimws(unlist(flags_lst)), collapse = "\n")
+    # browser()
+    metadata$qcMetrics = list(flags_lst)
     return(metadata)
 }
+
+calculate_cosine_similarity = function(A, B) {
+  is_allzero_A = all(A < 1e-8 & A > -1e-8)
+  is_allzero_B = all(B < 1e-8 & B > -1e-8)
+  is_allzero = is_allzero_A || is_allzero_B
+  if (is_allzero) {
+    return(NA_real_)
+  }
+  numerator = sum( A * B )
+  denominator = (
+    sqrt( sum( A^2 ) ) * sqrt( sum( B^2 ) )
+  )
+  return(numerator / denominator)
+}
+
+#' Signature Cosine Similarity
+#'
+#' Add Cosine Similarity to Metadata
+#'
+#' Calculates and adds cosine similarity metrics for mutational signatures to the metadata.
+#' Cosine similarity is computed between the decomposed signature matrix and the reference signature matrix.
+#' @param metadata A data.table containing metadata.
+#' @param channel_counts Channel mutation counts
+#' @param decomposed_signature_matrix Posterior signature probability per nucleotide (Summing across channels should add up to 1)
+#' @param signature_reference_matrix Signature channel emission probabilities (Summing across signature should add up to 1)
+#' @return Updated metadata with coverage metrics added.
+add_signature_cosine_similarity <- function(
+    metadata,
+    channel_counts = NULL,
+    decomposed_signature_matrix = NULL,
+    signature_reference_matrix = NULL,
+    field_name
+) {
+
+    test_file_presence = function(x) {
+        (
+            !is.null(x)
+            && is.character(x)
+            && NROW(x) == 1
+            && file.exists(x)
+        )
+    }
+
+    are_all_required_paths_found = (
+        test_file_presence(channel_counts)
+        && test_file_presence(decomposed_signature_matrix)
+        && test_file_presence(signature_reference_matrix)
+    )
+    if (!are_all_required_paths_found) {
+        return(metadata)
+    }
+    
+    ## FIXME: this path should be explicitly provided from gOSh onwards, but for now, hardcoding path resolution.
+    resolved_path = file.path(dirname(dirname(signature_reference_matrix)), "Signatures", "Assignment_Solution_Signatures.txt")
+    if (file.exists(resolved_path)) {
+        signature_reference_matrix = resolved_path
+    }
+
+    decomposed = fread(decomposed_signature_matrix)
+
+    channel_counts = fread(channel_counts)
+
+    refsig = fread(signature_reference_matrix)
+
+    normalized_channel = decomposed$MutationType
+    norm_channel_counts = channel_counts[match(normalized_channel, channel_counts$MutationType),]
+
+    nm = names(decomposed)
+    norm_sigs = nm[!nm %in% c("Sample Names", "MutationType")]
+
+    norm_decomposed_frac = decomposed[match(normalized_channel, decomposed$MutationType),]
+    norm_decomposed_frac = base::subset(norm_decomposed_frac, select = norm_sigs)
+    mat_decomposed_frac = as.matrix(norm_decomposed_frac)
+    rownames(mat_decomposed_frac) = normalized_channel
+
+    channel_count_col = names(norm_channel_counts)[!names(norm_channel_counts) %in% c("Sample Names", "MutationType")]
+
+    mat_channel_counts = as.matrix(base::subset(norm_channel_counts, select = channel_count_col))
+    rownames(mat_channel_counts) = normalized_channel
+
+    mat_decomposed_counts = sweep(x = mat_decomposed_frac, MARGIN = 1, STATS = mat_channel_counts, FUN = "*")
+
+    norm_ref = refsig[match(normalized_channel, refsig$MutationType)]
+    norm_ref = base::subset(norm_ref, select = norm_sigs)
+    mat_ref = as.matrix(norm_ref)
+    rownames(mat_ref) = normalized_channel
+
+    itersig = function(sig) {
+        vecA = mat_decomposed_counts[normalized_channel,sig]
+        vecB = mat_ref[normalized_channel,sig]
+        calculate_cosine_similarity(vecA, vecB)
+    }
+    
+    cosine_similarities = lapply(norm_sigs, itersig)
+    names(cosine_similarities) = norm_sigs
+
+    metadata[[field_name]] = list(as.list(cosine_similarities))
+
+    return(metadata)
+}
+
+
 
 #' @name add_coverage_metrics
 #' @title Add Coverage Metrics
@@ -741,14 +699,18 @@ add_coverage_metrics <- function(
         coverage_variance <- list(coverage_variance = cov_var)
         metadata$coverage_qc <- list(list(coverage_variance))
     }
+
+    test_exists = function(x) {
+        !is.null(x) && !any(Skilift::is_loosely_na(x))
+    }
     
     processed_metrics <- NULL
     if (
-        !is.null(estimate_library_complexity) ||
-        !is.null(alignment_summary_metrics) ||
-        !is.null(insert_size_metrics) ||
-        !is.null(tumor_wgs_metrics) ||
-        !is.null(normal_wgs_metrics)
+        test_exists(estimate_library_complexity) ||
+        test_exists(alignment_summary_metrics) ||
+        test_exists(insert_size_metrics) ||
+        test_exists(tumor_wgs_metrics) ||
+        test_exists(normal_wgs_metrics)
         ) {
         
         # processed_metrics <- process_qc_metrics2(
@@ -759,7 +721,7 @@ add_coverage_metrics <- function(
         #     normal_wgs_metrics,
         #     metadata$pair
         # )
-        processed_metrics <- process_qc_metrics2(
+        processed_metrics <- process_qc_metrics(
             estimate_library_complexity,
             alignment_summary_metrics,
             insert_size_metrics,
@@ -799,7 +761,7 @@ add_conpair <- function(
 
     normal_conpair_contamination_value = NA_real_
     tumor_conpair_contamination_value = NA_real_
-    if (!is.null(conpair_contamination)) {
+    if (!is.null(conpair_contamination) && !any(is.na(conpair_contamination))) {
         conpair_metrics = readLines(conpair_contamination)
         tumor_conpair_contamination_value = gsub(".*: ", "", conpair_metrics[2])
         tumor_conpair_contamination_value = as.numeric(gsub("%", "", tumor_conpair_contamination_value)) / 100
@@ -810,7 +772,7 @@ add_conpair <- function(
 
 
     conpair_concordance_metric = NA_real_
-    if (!is.null(conpair_concordance)) {
+    if (!is.null(conpair_concordance) && !any(is.na(conpair_concordance))) {
         conpair_metrics = readLines(conpair_concordance)
         conpair_concordance_metric = as.numeric(conpair_metrics[1])
     }
@@ -887,17 +849,25 @@ add_variant_counts <- function(
         is_rds = is_snvs_exists && grepl("rds$", somatic_snvs)
         is_vcf = is_snvs_exists && grepl("(v|b)cf(.gz|.bgz)?$", somatic_snvs)
         is_txt = is_snvs_exists && grepl("(txt|maf|(t|c)sv)(.gz|.bgz)?$", somatic_snvs)
-        is_other = is_txt || is_rds
+        is_numeric = is_length_one && is.numeric(somatic_snvs)
+        is_other_path = is_snvs_exists && !is_rds && !is_vcf
+        is_other = !is_numeric && (is_txt || is_rds || is_other_path)
+        is_numeric_or_other = is_numeric || is_other
         snv_counts_dt = data.table()
         if (is_vcf) {
             snv_counts_dt <- vcf_count(somatic_snvs, genome = genome)
         }
         if (is_rds) snvs = readRDS(somatic_snvs)
-        if (is_txt) snvs = fread(somatic_snvs)
-        if (is_other) {
+        if (is_txt || is_other_path) snvs = fread(somatic_snvs)
+        if (is_numeric) {
+            snv_count = somatic_snvs
+        } else if (is_other) {
+            snv_count = NROW(snvs)
+        }
+        if (is_numeric_or_other) {
             snv_counts_dt = data.table(
                 category = c("snv_count", "snv_count_normal_vaf_greater0"),
-                counts = c(NROW(snvs), NA_integer_)
+                counts = c(snv_count, NA_integer_)
             )
         }
         
@@ -1666,12 +1636,12 @@ create_metadata <- function(
     tumor_wgs_metrics = NULL,
     normal_wgs_metrics = NULL,
     het_pileups = NULL,
-    activities_indel_signatures = NULL,
-    deconstructsigs_sbs_signatures = NULL,
-    activities_sbs_signatures = NULL,
-    decomposed_sbs_signatures = NULL,
     decomposed_indel_signatures = NULL,
+    activities_indel_signatures = NULL,
     matrix_indel_signatures = NULL,
+    deconstructsigs_sbs_signatures = NULL,
+    decomposed_sbs_signatures = NULL,
+    activities_sbs_signatures = NULL,
     matrix_sbs_signatures = NULL,
     hrdetect = NULL,
     onenesstwoness = NULL,
@@ -1682,10 +1652,12 @@ create_metadata <- function(
     seqnames_genome_width_or_genome_length = c(1:22, "X", "Y"),
     denoised_coverage_field = "foreground",
     is_visible = TRUE,
-	summary = NULL,
+    summary = NULL,
     conpair_contamination = NULL,
     conpair_concordance = NULL,
-    cohort_type = NULL
+    cohort_type = NULL,
+    qc_flags_config = NULL,
+    added_field_values = NULL
 ) {
     
     # Initialize metadata with all possible columns
@@ -1738,7 +1710,23 @@ create_metadata <- function(
         matrix_indel_signatures,
         deconstructsigs_sbs_signatures
     )
-    
+
+    metadata = add_signature_cosine_similarity(
+        metadata,
+        channel_counts = matrix_sbs_signatures,
+        decomposed_signature_matrix = decomposed_sbs_signatures,
+        signature_reference_matrix = activities_sbs_signatures, ## FIXME: path is found through dirname search.. should be able to provide just a matrix to get the reference signatures
+        field = "sigprofiler_sbs_cosine_similarity"
+    )
+
+    metadata = add_signature_cosine_similarity(
+        metadata,
+        channel_counts = matrix_indel_signatures,
+        decomposed_signature_matrix = decomposed_indel_signatures,
+        signature_reference_matrix = activities_indel_signatures, ## FIXME: path is found through dirname search.. should be able to provide just a matrix to get the reference signatures
+        field = "sigprofiler_indel_cosine_similarity"
+    )
+
     # Add HRD scores
     metadata <- add_hrd_scores(metadata, hrdetect, onenesstwoness)
 
@@ -1750,9 +1738,17 @@ create_metadata <- function(
         metadata$visible <- FALSE
     }
 
-    metadata = process_qc_flag(metadata, Skilift:::qc_flag_thresholds)
+    metadata = process_qc_flag(metadata, qc_flags_config)
 
 	metadata$summary = summary
+
+    lstix = seq_len(NROW(added_field_values))
+    for (ii in lstix) {
+        field = added_field_values[ii]
+        fnm = names(field)
+        value = field[[1]]
+        metadata[[fnm]] = value
+    }
     
     return(metadata)
 }
@@ -1768,7 +1764,17 @@ create_metadata <- function(
 #' @param genome_length Genome length for the samples (for targeted panels or WES data)
 #' @return None
 #' @export
-lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(1:22, "X", "Y"), do_lift_datafiles_json = TRUE) {
+lift_metadata <- function(
+    cohort, 
+    output_data_dir, 
+    cores = 1, 
+    genome_length = c(1:22, "X", "Y"), 
+    do_lift_datafiles_json = TRUE,
+    added_fields = list(
+        tmb = c("field" = "tmb")
+    ),
+    added_from_schema = list(Skilift:::template_metadata)
+) {
     if (!inherits(cohort, "Cohort")) {
         stop("Input must be a Cohort object")
     }
@@ -1827,11 +1833,11 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
         if (is_oncokb_present) {
             snvs_column = row$oncokb_snv
         }
-
+        
         inferred_sex_field = row$inferred_sex
 
         purple_qc_path_for_fread = row$purple_qc
-        is_purple_qc_null = is.null(purple_qc_path_for_fread)
+        is_purple_qc_null = is.null(purple_qc_path_for_fread) 
         is_purple_pp_range_null = is.null(row$purple_pp_range)
         extracted_purple_qc_path = character(0)
         if (!is_purple_pp_range_null) {
@@ -1840,53 +1846,71 @@ lift_metadata <- function(cohort, output_data_dir, cores = 1, genome_length = c(
         if (is_purple_qc_null && NROW(extracted_purple_qc_path) > 0) {
             purple_qc_path_for_fread = extracted_purple_qc_path[1]
         }
-
+        
         is_purple_qc_path_valid = NROW(purple_qc_path_for_fread) == 1 && is.character(purple_qc_path_for_fread) && file.exists(purple_qc_path_for_fread)
         if (is_purple_qc_path_valid) {
             inferred_sex_field = fread(purple_qc_path_for_fread, header = FALSE)[V1 == "AmberGender"]$V2
             inferred_sex_field = tools::toTitleCase(tolower(inferred_sex_field))
         }
 
-        futile.logger::flog.threshold("ERROR")
-        tryCatchLog(
-            {
-                # Create metadata object
+        lstix = seq_len(NROW(added_fields))
+        added_fields_lst = list()
 
-                metadata <- create_metadata(
-                    pair = row$pair,
-                    tumor_type = row$tumor_type,
-                    tumor_details = row$tumor_details,
-                    disease = row$disease,
-                    primary_site = row$primary_site,
-                    inferred_sex = inferred_sex_field,
-                    purple_pp_bestFit = row$purple_pp_bestFit,
-                    jabba_gg = row[[jabba_column]],
-                    events = row$events,
-                    somatic_snvs = snvs_column,
-                    germline_snvs = row$germline_snvs,
-                    foreground_col_name = row$denoised_coverage_field,
-                    tumor_coverage = row$tumor_coverage,
-                    estimate_library_complexity = row$estimate_library_complexity,
-                    alignment_summary_metrics = row$alignment_summary_metrics,
-                    insert_size_metrics = row$insert_size_metrics,
-                    tumor_wgs_metrics = row$tumor_wgs_metrics,
-                    normal_wgs_metrics = row$normal_wgs_metrics,
-                    het_pileups = row$het_pileups,
-                    activities_sbs_signatures = row$activities_sbs_signatures,
-                    activities_indel_signatures = row$activities_indel_signatures,
-                    decomposed_sbs_signatures = row$decomposed_sbs_signatures,
-                    decomposed_indel_signatures = row$decomposed_indel_signatures,
-                    matrix_indel_signatures = row$matrix_indel_signatures,
-                    matrix_sbs_signatures = row$matrix_sbs_signatures,
-                    hrdetect = row$hrdetect,
-                    onenesstwoness = row$onenesstwoness,
-                    msisensorpro = row$msisensorpro,
-                    seqnames_genome_width_or_genome_length = genome_length,
-                    denoised_coverage_field = row$denoised_coverage_field,
-                    is_visible = row$metadata_is_visible,
-                    summary = row$string_summary,
-                    cohort_type = cohort_type
-                )
+        for (ii in lstix) {
+            f = added_fields[ii]
+            fnm = names(f)
+            is_in_row = all(exists(fnm, envir = as.environment(row)))
+            if (!is_in_row) next
+            append_lst = list(row[[fnm]])
+            names(append_lst) = fnm
+            added_fields_lst = c(added_fields_lst, append_lst)
+        }
+        
+        
+        futile.logger::flog.threshold("ERROR")
+        tryCatchLog({
+
+            # Create metadata object
+
+            metadata <- create_metadata(
+                pair = row[["pair"]],
+                tumor_type = row[["tumor_type"]],
+                tumor_details = row[["tumor_details"]],
+                disease = row[["disease"]],
+                primary_site = row[["primary_site"]],
+                inferred_sex = inferred_sex_field,
+                purple_pp_bestFit = row[["purple_pp_bestFit"]],
+                jabba_gg = row[[jabba_column]],
+                events = row[["events"]],
+                somatic_snvs = snvs_column,
+                germline_snvs = row[["germline_snvs"]],
+                foreground_col_name = row[["denoised_coverage_field"]],
+                tumor_coverage = row[["tumor_coverage"]],
+                estimate_library_complexity = row[["estimate_library_complexity"]],
+                alignment_summary_metrics = row[["alignment_summary_metrics"]],
+                insert_size_metrics = row[["insert_size_metrics"]],
+                tumor_wgs_metrics = row[["tumor_wgs_metrics"]],
+                normal_wgs_metrics = row[["normal_wgs_metrics"]],
+                het_pileups = row[["het_pileups"]],
+                decomposed_sbs_signatures = row[["decomposed_sbs_signatures"]],
+                decomposed_indel_signatures = row[["decomposed_indel_signatures"]],
+                matrix_sbs_signatures = row[["matrix_sbs_signatures"]],
+                matrix_indel_signatures = row[["matrix_indel_signatures"]],
+                activities_sbs_signatures = row[["activities_sbs_signatures"]],
+                activities_indel_signatures = row[["activities_indel_signatures"]],
+                hrdetect = row[["hrdetect"]],
+                onenesstwoness = row[["onenesstwoness"]],
+                msisensorpro = row[["msisensorpro"]],
+                seqnames_genome_width_or_genome_length = genome_length,
+                denoised_coverage_field = row[["denoised_coverage_field"]],
+                is_visible = row[["metadata_is_visible"]],
+                conpair_contamination = row[["conpair_contamination"]],
+                conpair_concordance = row[["conpair_concordance"]],
+                summary = row[["string_summary"]],
+                cohort_type = cohort_type,
+                qc_flags_config = row[["qc_flags"]][[1]],
+                added_field_values = added_fields_lst
+            )
 
                 if (is.null(metadata)) {
                     print(sprintf("No metadata generated for %s", row$pair))
@@ -1936,49 +1960,47 @@ lift_datafiles_json <- function(output_data_dir, cores = 1) {
   if (!dir.exists(output_data_dir)) {
     stop("Data directory does not exist.")
   }
-  
-  # Recursively look for all files named "metadata.json"
-  metadata_files <- list.files(
-    path = output_data_dir,
-    pattern = "metadata\\.json$",
-    recursive = TRUE,
-    full.names = TRUE
-  )
+
+  ## Just expect that the right data directory and structure is provided
+  direcs = list.dirs(output_data_dir, recursive = FALSE)
+  metadata_files = file.path(direcs, "metadata.json")
+  is_present = file.exists(metadata_files)
+  all_absent = !any(is_present)
+  metadata_files = metadata_files[is_present]
+  if (all_absent) {
+    # Recursively look for all files named "metadata.json"
+    message("No metadata.json files found in the specified directory. Attempting recursive search")
+    metadata_files <- list.files(
+        path = output_data_dir,
+        pattern = "metadata\\.json$",
+        recursive = TRUE,
+        full.names = TRUE
+    )
+  }
   
   if (length(metadata_files) == 0) {
     stop("No metadata.json files found in the specified directory.")
   }
+
+  
   
   # Read each JSON file and combine them into a list
-combined_data <- mclapply(metadata_files, function(file) {
-    
-    if (!file.exists(file)) {
-        warning(sprintf("File does not exist: %s", file))
-        return(NULL)
-    }
-    
-    if (!file.access(file, 4) == 0) {
-        warning(sprintf("File is not readable: %s", file))
-        return(NULL)
-    }
-    
-    if (!grepl("\\.json$", file, ignore.case = TRUE)) {
-        warning(sprintf("File is not a JSON file: %s", file))
-        return(NULL)
-    }
-    
-    file_info <- file.info(file)
-    if (is.na(file_info$size) || file_info$size == 0) {
-        warning(sprintf("JSON file is empty: %s", file))
-        return(NULL)
-    }
-    json_content <- jsonlite::fromJSON(file)
-    return(jsonlite::unbox(json_content))
-    
-}, mc.cores = cores)
-
-# Remove NULL entries from failed reads
-combined_data <- combined_data[!sapply(combined_data, is.null)]
+  combined_data <- mclapply(
+    X = metadata_files, 
+    FUN = function(file) {
+        main = function() {
+            unbox(jsonlite::fromJSON(file))
+        }
+        tryCatchLog(
+            main(), 
+            error = function(e) {
+                warning(sprintf("Error reading %s: %s", file, e$message))
+                NULL
+            }
+        )
+    }, 
+    mc.cores = cores
+)
 
   # Write the combined JSON list to "datafiles.json" in the data directory
   output_file <- file.path(output_data_dir, "datafiles.json")
@@ -1990,6 +2012,72 @@ combined_data <- combined_data[!sapply(combined_data, is.null)]
   invisible(convert_json_to_arrow(output_file))
   
 }
+
+
+test_list_attributes = function(x) {
+  ## x = data[["sv_types_count"]]
+  is_list = inherits(x, c("list", "List"))
+  if (!is_list) {
+    return(list(
+      is_simple_list = FALSE,
+      is_ragged_list_depth1 = FALSE,
+      is_deeply_nested = FALSE,
+      is_list_of_dataframes = FALSE
+    ))
+  }
+  test_element_data_frame = function(listObj) {
+    any(
+      vapply(
+        X = listObj,
+        FUN = function(x) inherits(x, c("data.frame", "DataFrame")),
+        FUN.VALUE = logical(1)
+      )
+    )
+  }
+  nr = NROW(x)
+  lens = S4Vectors::elementNROWS(x)
+  nr_lens = NROW(lens)
+  is_all_same_len = all(diff(lens) == 0)
+  is_deeply_nested = ! identical(sum(lens), length(unlist(x)))
+  is_list_of_dataframes = FALSE
+  if (is_list) {
+    is_list_of_dataframes = test_element_data_frame(x)
+  }
+  if (is_list_of_dataframes) is_deeply_nested = FALSE
+  is_simple_list = is_list && !is_list_of_dataframes
+  is_empty = is_list && (nr == 0 || nr_lens == 0)
+  is_ragged_list_depth1 = is_simple_list && !is_all_same_len ## doesn't guarantee that nested list is ragged, but whatever.. deal with if nested list is ragged case if it arises later
+  return(
+    list(
+      is_simple_list = is_simple_list,
+      is_ragged_list_depth1 = is_ragged_list_depth1,
+      is_deeply_nested = is_deeply_nested,
+      is_list_of_dataframes = is_list_of_dataframes,
+      is_empty = is_empty
+    )
+  )
+}
+
+dunlist = function (x) {
+  listid = rep(seq_len(NROW(x)), S4Vectors::elementNROWS(x))
+  emptydt = data.table::data.table(listid = integer(0), V1 = integer(0))
+  data.table::setkey(emptydt, listid)
+  if (NROW(x) == 0) {
+    return(emptydt)
+  }
+  if (!is.null(names(x))) 
+    listid = names(x)[listid]
+  xu = unlist(x, use.names = FALSE)
+  if (is.null(xu)) {
+    return(emptydt)
+  }
+  if (!(inherits(xu, "data.frame")) | inherits(xu, "data.table")) 
+    xu = data.table(V1 = xu)
+  out = cbind(data.table(listid = listid), xu)
+  data.table::setkey(out, listid)
+  return(out)
+}
+
 
 
 #' Convert a JSON file to an Arrow file.
@@ -2033,37 +2121,69 @@ convert_json_to_arrow <- function(json_file_path, arrow_file_path = NULL) {
     })
   }
 
-    # Pre-process list columns that might cause issues with Arrow type inference
-    list_cols <- names(data)[sapply(data, function(x) is.list(x) && !is.data.frame(x))]
+  # Pre-process list columns that might cause issues with Arrow type inference
+  is_simple_empty <- function(el) {
+    is.null(el) ||
+    (is.atomic(el) && length(el) == 0) ||
+    (is.list(el) && !is.data.frame(el) && length(el) == 0)
+  }
+  for (col_name in names(data)) {
 
-    if (length(list_cols) > 0) {
-        is_simple_empty <- function(el) {
-            is.null(el) ||
-            (is.atomic(el) && length(el) == 0) ||
-            (is.list(el) && !is.data.frame(el) && length(el) == 0)
-        }
-        
-        empty_list_cols <- list_cols[sapply(list_cols, function(col_name) {
-            all(sapply(data[[col_name]], is_simple_empty))
-        })]
-        
-        if (length(empty_list_cols) > 0) {
-            cat(paste("Transforming columns:", paste(empty_list_cols, collapse = ", "), 
-                                "to vectors of NA_character_ because all their elements were simple_empty.\n"))
-            
-            data[empty_list_cols] <- lapply(data[empty_list_cols], function(x) {
-                rep(NA_character_, length(x))
-            })
-        }
+    # Only process actual list-columns, not columns that are themselves data.frames
+    val = data[[col_name]]    
+    lst_attributes = test_list_attributes(val)
+    is_simple_list = lst_attributes$is_simple_list
+    is_ragged_list_depth1 = lst_attributes$is_ragged_list_depth1
+    is_list_of_dataframes = lst_attributes$is_list_of_dataframes
+    is_list = is_simple_list || is_list_of_dataframes
+
+    if (is_list) {
+
+      len = length(val)
+      val_revise = rep_len(NA_character_, len)    
+      
+      all_elements_empty <- all(sapply(data[[col_name]], is_simple_empty))
+
+      do_revise_values = all_elements_empty || is_ragged_list_depth1
+      
+      if (! do_revise_values) {
+        next
+      }
+
+      ## If json -> data.frame conversion has edge cases
+      ## that need to be dealt with
+      ## all empty values and ragged lists
+      ## i.e. list( list(1, 2, 3), list(1, 2) )
+      ## need to be converted to convert to arrow 
+
+      if (all_elements_empty) {
+        cat(paste("Transforming column:", col_name, "to a vector of NA_character_ because all its elements were simple_empty.\n"))
+        # Convert to a simple vector of NA_character_ of the correct length
+      }
+
+      if (is_ragged_list_depth1) {
+        val_unlisted = Skilift:::dunlist(val)
+        val_unlisted$names = names(unlist(val))
+        df = data.frame(key = val_unlisted$names, value = val_unlisted$V1)
+        rownames(df) = NULL
+        val_revise = split(
+            df,
+            val_unlisted$listid
+        )[as.character(seq_len(NROW(val)))]
+        names(val_revise) = rep_len(col_name, NROW(val_revise))
+      }
+
+      data[[col_name]] <- val_revise
     }
+  }
 
   # Write Arrow file
   tryCatch({
-    arrow::write_feather(data, arrow_file_path)
+    arrow::write_feather(data, arrow_file_path, compression = "uncompressed")
+    message("Successfully converted ", json_file_path, " to ", arrow_file_path)
   }, error = function(e) {
-    stop("Error writing Arrow file: ", e$message)
+    message("Error writing Arrow file: ", e$message)
   })
 
-  message("Successfully converted ", json_file_path, " to ", arrow_file_path)
   return(invisible(data))
 }

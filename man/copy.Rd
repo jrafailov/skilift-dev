@@ -4,7 +4,7 @@
 \alias{copy}
 \title{make deep copy, recursively}
 \usage{
-copy(x, recurse_list = TRUE)
+copy(x, recurse_list = TRUE, depth = 0L)
 }
 \description{
 useful for dev

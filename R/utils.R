@@ -140,6 +140,10 @@ meltski = function(
   keep_first_variable_col = identical(keep_first_variable_col, TRUE)
   keep_remaining_cols = identical(keep_remaining_cols, TRUE)
   keep_original_cols = identical(keep_original_cols, TRUE)
+
+  is_measure_vars_missing = missing(measure.vars)
+  is_id_vars_missing = missing(id.vars)
+  
   
   is_table = is.table(tbl)
   
@@ -169,9 +173,11 @@ meltski = function(
   all_measure_vars = measure.vars
   if (is_measure_vars_list) all_measure_vars = unlist(measure.vars)
     
-  if (missing(id.vars)) {
+  if (is_id_vars_missing && ! is_measure_vars_missing) {
     id.vars = all_names
     id.vars = id.vars[!id.vars %in% all_measure_vars]
+  } else if (is_measure_vars_missing && !is_id_vars_missing) {
+    all_measure_vars = base::Filter(function(x) !x %in% id.vars, list(all_names))
   }
   skel = NULL
   collected_var_names = character(0)
@@ -188,7 +194,7 @@ meltski = function(
     if (is.list(var)) var = unlist(var)
     tbl_to_rbind = base::subset(tbl, select = names(tbl) %in% c(id.vars, var))
     if (drop) {
-      is_none_na = base::complete.cases(
+      is_none_na = stats::complete.cases(
         base::subset(tbl_to_rbind, select = names(tbl_to_rbind) %in% var)
       )
       tbl_to_rbind = base::subset(tbl_to_rbind, is_none_na)
@@ -208,8 +214,42 @@ meltski = function(
       var.col = paste(variable.name, "_", i, sep = "")
       tbl_to_rbind[[var.col]] = var[i]
       collected_var_names = c(collected_var_names, var.col)
-    }    
-    skel = data.table:::rbind.data.table(skel, tbl_to_rbind, fill = TRUE)
+    }
+    ## if (inherits(tbl_to_rbind[["value_1"]], "character")) browser()
+    colnames_skel = skel_names = names(skel)
+    colnames_tbl_to_rbind = tbl_to_rbind_names = names(tbl_to_rbind)
+    commons = intersect(colnames_skel, colnames_tbl_to_rbind)
+    for (nm in commons) {
+        x_skel = skel[[which(colnames_skel == nm)]]
+        x_tbl = tbl_to_rbind[[which(colnames_tbl_to_rbind == nm)]]
+        class_skel = class(x_skel)
+        class_tbl = class(x_tbl)
+        is_skel_character = inherits(x_skel, "character")
+        is_tbl_character = inherits(x_tbl, "character")
+        is_either_character = is_skel_character || is_tbl_character
+        is_skel_numeric = is.numeric(x_skel)
+        is_tbl_numeric = is.numeric(x_tbl)
+        is_class_same = identical(class_skel, class_tbl)
+        is_the_same = (
+            ( is_skel_numeric && is_tbl_numeric )
+            || is_class_same
+        )
+        is_different_but_numeric = (
+            ( is_skel_numeric && is_tbl_numeric )
+            && !is_class_same
+        )
+        do_change_to_character = !is_the_same && is_either_character
+        do_change_to_double = is_different_but_numeric
+        if (do_change_to_character) {
+            skel[[which(colnames_skel == nm)]] = as.character(x_skel)
+            tbl_to_rbind[[which(colnames_tbl_to_rbind == nm)]] = as.character(x_tbl)
+        }
+        if (do_change_to_double) {
+            skel[[which(colnames_skel == nm)]] = as.double(x_skel)
+            tbl_to_rbind[[which(colnames_tbl_to_rbind == nm)]] = as.double(x_tbl)
+        }
+    }
+    skel = data.table:::rbind.data.table(skel, tbl_to_rbind, fill = TRUE, ignore.attr = TRUE)
   }
   collected_var_names = unique(collected_var_names)
   if (nzchar(group_regex)) {
@@ -239,6 +279,7 @@ meltski = function(
     remaining_tbl = base::subset(tbl, select = is_selection)
     skel = merge(skel, remaining_tbl, by = id.vars, all.x = TRUE)
   }
+  
   return(skel)
 }
 
@@ -365,11 +406,11 @@ test_path = function(
   is_not_valid = is_character && ! NROW(object) == 1
   is_na = is_len_one && all(Skilift::is_loosely_na(object, other_nas = base::nullfile()))
   is_possible_path = is_character && is_len_one && !is_na
-  is_existent_path = is_possible_path && file.exists(object)
-  is_rds = is_possible_path && grepl(rds_regex, object)
-  is_vcf = is_possible_path && grepl(vcf_regex, object)
-  is_bcf = is_possible_path && grepl(bcf_regex, object)
-  is_gff = is_possible_path && grepl(gff_regex, object)
+  is_existent_path = is_possible_path && all(file.exists(object))
+  is_rds = is_possible_path && all(grepl(rds_regex, object))
+  is_vcf = is_possible_path && all(grepl(vcf_regex, object))
+  is_bcf = is_possible_path && all(grepl(bcf_regex, object))
+  is_gff = is_possible_path && all(grepl(gff_regex, object))
   logicals = as.list(data.frame(
       is_null,
       is_character,
@@ -407,12 +448,16 @@ test_paths = function(
   vcf_regex = ".vcf(.bgz|.gz){0,}$",
   verbose = TRUE
 ) {
+  default_lgl = rep_len(FALSE, NROW(objects))
   is_null = is.null(objects)
   is_character = is.character(objects)
   is_na = Skilift::is_loosely_na(objects, other_nas = base::nullfile())
-  is_possible_path = is_character & !is_na
+  is_possible_path = default_lgl
+  if (is_character) {
+    is_possible_path = !is_na
+  }
   if (!is_character) {
-	objects = as.character(objects)
+	  objects = as.character(objects)
   }
   is_robust_file_exists = tryCatch(file.exists(objects), error = function(e) rep_len(FALSE, NROW(objects)))
   is_existent_path = is_possible_path & is_robust_file_exists
@@ -877,30 +922,71 @@ merge.repl = function(dt.x,
 #'
 #' @name copy
 #' @export copy
-copy = function (x, recurse_list = TRUE) {
-    if (inherits(x, "R6")) {
-        x2 = rlang::duplicate(x$clone(deep = T))
-        for (name in intersect(names(x2$.__enclos_env__), c("private", 
-                                                            "public", "self"))) {
-            for (nname in names(x2$.__enclos_env__[[name]])) {
-                tryCatch({
-                    x2$.__enclos_env__[[name]][[nname]] = Skilift::copy(x2$.__enclos_env__[[name]][[nname]])
-                }, error = function(e) NULL)
+copy = function (x, recurse_list = TRUE, depth = 0L) {
+  out = tryCatch(
+    Skilift:::copy_internal(x,  recurse_list = TRUE, depth = 0L),
+    error = function(e) {
+      return(e$return_obj)
+    }
+  )
+  return(out)
+
+}
+
+copy_internal = function (x, recurse_list = TRUE, verbose = FALSE, depth = 0L) {
+    is_r6 = inherits(x, "R6")
+    is_s4 = base::isS4(x)
+    is_list = inherits(x, c("list"))
+    is_datatable = inherits(x, "data.table")
+    if (identical(depth, 0L)) top_env = environment()
+    if (is_r6) {
+      x2 = rlang::duplicate(x$clone(deep = T))
+      if (identical(depth, 0L)) top_env$x2 = x2
+      encenv = ".__enclos_env__"
+      names_to_copy = names(x2[[encenv]])
+      names_to_copy = names_to_copy[!names_to_copy %in% encenv]
+      active_field = grep("active", names_to_copy, value = TRUE)
+      active_names = names(x2[[encenv]][[active_field]])
+      for (name in names_to_copy) {
+        is_function = is.function(x2[[encenv]][[name]])
+        names_in_env = names(x2[[encenv]][[name]])
+        names_in_env = names_in_env[!names_in_env %in% encenv]
+        for (nname in names_in_env) {
+            if (name %in% "self" && nname %in% active_names) next
+            obj = x2[[encenv]][[name]][[nname]]
+            is_fun = is.function(obj)
+            if (is_fun) next
+            objname = paste(name, nname)
+            is_nested_r6 = inherits(obj, "R6")
+            if (is_nested_r6 && all(dynGet("top_env")$x2 == obj)) {
+              cond = structure(
+                list(
+                  message = "Self-referential field detected",
+                  return_obj = obj
+                ),
+                class = c("self_reference_error", "error", "condition")
+              )
+              stop(cond)
             }
+            x2[[encenv]][[name]][[nname]] = Skilift:::copy_internal(obj, depth = depth + 1L)
         }
-        return(x2)
-    } else if (base::isS4(x)) {
+      }
+      return(x2)
+    } else if (is_s4) {
         x2 = rlang::duplicate(x)
         slns = slotNames(x2)
         for (sln in slns) {
             tryCatch({
-                slot(x2, sln) = Skilift::copy(slot(x2, sln))
+                slot(x2, sln) = Skilift:::copy_internal(slot(x2, sln), depth = depth + 1L)
             }, error = function(e) NULL)
         }
         return(x2)
-    } else if (inherits(x, c("list"))) {
+    } else if (is_list) {
         x2 = rlang::duplicate(x)
-        x2 = rapply(x2, Skilift::copy, how = "replace")
+        if (identical(recurse_list, TRUE)) x2 = rapply(x2, Skilift:::copy_internal, how = "replace", depth = depth + 1L)
+        return(x2)
+    } else if (is_datatable) {
+        x2 = data.table::copy(x)
         return(x2)
     } else {
         x2 = rlang::duplicate(x)
@@ -1055,4 +1141,53 @@ test_hist = function(values, integer_breaks = -1:5, tolerance = 1e-12) {
 	histdt[, is_in_integer_breaks := FALSE]
 	histdt[ix_histdt_select, is_in_integer_breaks := TRUE]
 	return(histdt)
+}
+
+
+nacharacter = function(df) {
+  dm = dim(df)
+  is_no_dimensions = is.null(dm)
+  if (is_no_dimensions) return(df)
+  nafun = function(x) {
+    trimmed = trimws(x)
+    xna = ifelse(
+      is_loosely_na(trimmed) | !nzchar(trimmed),
+      NA_character_,
+      x
+    )
+    return(xna)
+  }
+  jx = seq_len(NCOL(df))
+  for (j in jx) {
+    v = df[[j]]
+    is_character = is.character(v)
+    if (!is_character) next
+    vna = nafun(v)
+    df[[j]] = vna
+  }
+  return(df)
+}
+
+#' Order to Rank
+#'
+#' Convert order index to rank
+#'
+#' Useful for ordering based on multiple factors
+#' @export
+order_to_rank <- function(x, ties.method = "average", order_fun = base::order) {
+  o = order_fun(x)
+  ## o <- stringr::str_order(x, numeric = TRUE)
+  xs <- x[o]
+
+  # identify ties under natural comparison
+  is_new <- c(TRUE, xs[-1] != xs[-length(xs)])
+  group <- cumsum(is_new)
+
+  # rank unique groups
+  group_rank <- rank(group, ties.method = ties.method)
+
+  # expand back
+  r <- numeric(length(x))
+  r[o] <- group_rank
+  r
 }

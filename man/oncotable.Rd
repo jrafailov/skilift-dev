@@ -21,7 +21,8 @@ oncotable(
   verbose = TRUE,
   amp.thresh = 4,
   filter = "PASS",
-  del.thresh = 0.5
+  del.thresh = 0.5,
+  somatic_variant_annotations_fields = Skilift:::echtvar_vcf_fields
 )
 }
 \arguments{

@@ -29,7 +29,22 @@ create_heme_highlights = function(
   ##     ] | null
   ##   }
   
-  
+  is_confidence_present = all(exists("Confidence", envir = as.environment(as.list(events_tbl))))
+  use_confidence = FALSE
+  if (is_confidence_present) {
+    conf = events_tbl[["Confidence"]]
+    is_list = !is.null(conf) && is.list(conf)
+    use_confidence = is_list && (all(exists("desc", envir = as.environment(conf[[1]]))))
+  }
+  if (use_confidence) {
+    conf_level = sapply(conf, `[[`, "desc")
+    new_tier = data.table::fcase(
+      conf_level == "High Confidence", 1L,
+      conf_level == "Low Confidence", 99999L,
+      default = 1L
+    )
+    events_tbl$Tier = new_tier
+  }
   
   ## TODO: remove everything below except for karyotype_string
   karyotype_string = ""
@@ -493,7 +508,7 @@ create_heme_highlights_eln_risk_score = function(small_muts, svs, cna, karyotype
 
   variantp = regmatches(small_muts$Variant, gregexpr("(p\\.[a-zA-Z0-9_]+)", small_muts$Variant))
   variantp[base::lengths(variantp) == 0] = ""
-  variantp = dunlist(variantp)
+  variantp = Skilift:::dunlist(variantp)
 
   variantp_coord = regmatches(variantp$V1, gregexpr("[0-9]+", variantp$V1))
   variantp_coord[base::lengths(variantp_coord) == 0] = ""
@@ -562,8 +577,29 @@ create_summary = function(
   events_tbl, ## filtered events R output
   altered_copies_threshold = 0.1,
   cohort_type,
-  cohorttuple
+  cohorttuple,
+  show_all_tags = FALSE,
+  show_all_small_muts_tags = FALSE,
+  show_all_cna_tags = FALSE,
+  show_all_svs_tags = FALSE
 ) {
+
+  is_confidence_present = all(exists("Confidence", envir = as.environment(as.list(events_tbl))))
+  use_confidence = FALSE
+  if (is_confidence_present) {
+    conf = events_tbl[["Confidence"]]
+    is_list = !is.null(conf) && is.list(conf)
+    use_confidence = is_list && (all(exists("desc", envir = as.environment(conf[[1]]))))
+  }
+  if (use_confidence) {
+    conf_level = sapply(conf, `[[`, "desc")
+    new_tier = data.table::fcase(
+      conf_level == "High Confidence", 1L,
+      conf_level == "Low Confidence", 99999L,
+      default = 1L
+    )
+    events_tbl$Tier = new_tier
+  }
 
   small_muts = events_tbl[events_tbl$vartype == "SNV",]
   hemedb = readRDS(Skilift:::HEMEDB())
@@ -583,13 +619,17 @@ create_summary = function(
 	criterias = criterias[1:2]
   }
   is_small_mutation_relevant = base::Reduce("&", criterias)
-  small_muts_parsed = ""
-  if (
+
+  if (show_all_tags || show_all_small_muts_tags) is_small_mutation_relevant = is_small_mutation_relevant | TRUE
+
+  do_small_mut_summary_tag = (
     NROW(small_muts) > 0
     && any(
       is_small_mutation_relevant
     )
-  ) {
+  )
+  small_muts_parsed = ""
+  if (do_small_mut_summary_tag) {
     small_muts_out = small_muts[is_small_mutation_relevant]
     hits_multi = (
       small_muts_out[
@@ -643,6 +683,7 @@ create_summary = function(
   hemedb_fusions_fr = rbind(hemedb_fusions, hemedb_fusions_rev)
 
   svs = events_tbl[grepl("fusion", events_tbl$type, ignore.case = TRUE)]
+
   #   svsForJson = data.table::copy(emptyDfForJson)
   fg_exon = svs$fusion_genes ## this still works if svs is empty
   fg_exon = gsub("@.*$", "", fg_exon)
@@ -665,24 +706,23 @@ create_summary = function(
   }
   is_svs_relevant = Reduce("&", criterias)
 
+  if (show_all_tags || show_all_svs_tags) is_svs_relevant = is_svs_relevant | TRUE
+
   svs_parsed = ""
-  if (
-    NROW(svs) > 0
-    && any(
-      is_svs_relevant
-    )
-  ) {
+  do_svs_summary_tag = (NROW(svs) > 0 && any(is_svs_relevant))
+  if (do_svs_summary_tag) {
     # svs_parsed = (
     #   base::subset(svs, is_svs_relevant)[, .(gene, type)]
     #     [, paste(type, ": ", paste(gene, collapse = ","), sep = ""), by = type]
     #     $V1
     # )
 
-	svs_parsed = (
-      base::subset(svs, is_svs_relevant)[, .(gene, type)]
-        [, paste(type, ": ", gene, sep = ""), by = type]
-        $V1
+    svs_parsed = (
+        base::subset(svs, is_svs_relevant)[, .(gene, type)]
+          [, paste(type, ": ", gene, sep = ""), by = type]
+          $V1
     )
+    svs_parsed = unique(svs_parsed)
 
   }
   
@@ -697,7 +737,11 @@ create_summary = function(
 	criterias = criterias[1]
   }
   is_cna_relevant = Reduce("&", criterias)
-  if (NROW(cna) > 0 && any(is_cna_relevant)) {
+
+  if (show_all_tags || show_all_cna_tags) is_cna_relevant = is_cna_relevant | TRUE
+
+  do_cna_summary_tag = NROW(cna) > 0 && any(is_cna_relevant)
+  if (do_cna_summary_tag) {
     cna_out = cna[is_cna_relevant,]
     cna_out$vartype = tools::toTitleCase(tolower(cna_out$vartype))
 
@@ -732,7 +776,7 @@ create_summary = function(
   complex_parsed = ""
   # Ensure events_tbl is a data.table and has type column
   if (is.data.frame(events_tbl) && "type" %in% names(events_tbl)) {
-    complex_sv = events_tbl[type == "Complex SV"]
+    complex_sv = events_tbl[events_tbl$type == "Complex SV",]
     if (NROW(complex_sv) > 0) {
       string_complex = unique(gsub(": [0-9]+", "", complex_sv$Variant))
       complex_parsed = paste("Complex SV: ", string_complex, sep = "")
@@ -740,7 +784,7 @@ create_summary = function(
     }
   }
 
-
+  
   summary_string = paste(
     paste(small_muts_parsed, collapse = "\n"),
     paste(cna_parsed, collapse = "\n"),

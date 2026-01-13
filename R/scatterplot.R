@@ -60,6 +60,8 @@ get_ref_metadata <- function(ref_seqinfo_json, ref = NULL) {
 #' @param mask (logical) whether to mask the coverage data (default: TRUE)
 #' @param mask.path path to mask file (default: system.file("extdata", "data", "maskA_re.rds", package = "Skilift"))
 #' @param ... additional arguments to pass to cov2cov.js
+#' @param arrow_x_type arrow type function for x values (default: arrow::float32)
+#' @param arrow_y_type arrow type function for y values (default: arrow::float32)
 #' @return arrow table
 #' @author Alon Shaiber, Shihab Dider
 granges_to_arrow_scatterplot <- function(
@@ -71,6 +73,9 @@ granges_to_arrow_scatterplot <- function(
     bin.width = 1e4,
     mask = TRUE,
     mask.path = system.file("extdata", "data", "maskA_re.rds", package = "Skilift"),
+    arrow_x_type = arrow::float32,
+    arrow_y_type = arrow::float32,
+
     ...) {
     if (!requireNamespace("arrow", quietly = TRUE)) {
         stop('You must have the package "arrow" installed in order for this function to work. Please install it.')
@@ -136,8 +141,10 @@ granges_to_arrow_scatterplot <- function(
     arrow_table <- arrow::Table$create(
         outdt,
         schema = arrow::schema(
-            x = arrow::float32(),
-            y = arrow::float32(),
+            # x = arrow::float32(),
+            # y = arrow::float32(),
+            x = arrow_x_type(),
+            y = arrow_y_type(),
             color = arrow::float32()
         )
     )

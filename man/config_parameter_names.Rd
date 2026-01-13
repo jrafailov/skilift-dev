@@ -5,7 +5,7 @@
 \alias{config_parameter_names}
 \title{Configuration parameter names}
 \format{
-An object of class \code{character} of length 16.
+An object of class \code{character} of length 17.
 }
 \usage{
 config_parameter_names
