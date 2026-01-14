@@ -1536,11 +1536,21 @@ merge_annotations = function(onco, annotated_vcf, fields = Skilift:::echtvar_vcf
   onco$IX = seq_len(NROW(onco))
 
   onco[, vkey := paste(Chromosome, vcf_pos, vcf_alt, sep = "-___-")]
+  
+  # Filter fields to only those that actually exist in dtvcf
+  fields_available = intersect(fields, names(dtvcf))
+  if (length(fields_available) < length(fields)) {
+    missing_fields = setdiff(fields, fields_available)
+    message(sprintf("Warning: %d fields not found in VCF data: %s", 
+                    length(missing_fields), 
+                    paste(head(missing_fields, 5), collapse = ", ")))
+  }
+  
   onco = merge(
     onco,
     base::subset(
       dtvcf,
-      select = c("vkey", fields)
+      select = c("vkey", fields_available)
     ),
     all.x = TRUE,
     by = "vkey",
