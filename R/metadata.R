@@ -2006,9 +2006,6 @@ lift_datafiles_json <- function(output_data_dir, cores = 1) {
   output_file <- file.path(output_data_dir, "datafiles.json")
   jsonlite::write_json(combined_data, output_file, auto_unbox = TRUE, pretty = TRUE, null = "null")
 
-  browser()
-  debug(convert_json_to_arrow)
-
   invisible(convert_json_to_arrow(output_file))
   
 }
