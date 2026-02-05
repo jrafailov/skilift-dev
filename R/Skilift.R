@@ -309,7 +309,7 @@ Skilift <- R6Class("Skilift",
     #' @param cores (`number(1)`)\cr
     #'  Number of cores to use for parallel execution
     #' @return NULL.
-    add_plots = function(plots_to_add, cores=2) {
+  add_plots = function(plots_to_add, cores=2) {
       new_plots <- data.table::setDT(plots_to_add) # Convert to data.table if required
       if (!("overwrite" %in% tolower(names(new_plots)))) {
         new_plots[, overwrite := FALSE]

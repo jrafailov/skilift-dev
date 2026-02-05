@@ -297,6 +297,7 @@ process_qc_metrics <- function(
         if (is_invalid) stop(path, ": invalid path!")
         if (!test_file_is_present(path)) return(data.table::data.table(pair = pair))
         fcon = file(path, "r")
+        on.exit(close(fcon))
         txt = character(0)
         l = readLines(fcon, 1)
         is_comment = startsWith(l, "#")
@@ -315,6 +316,12 @@ process_qc_metrics <- function(
             nr = NROW(l)
             is_empty = nr == 0 || !nzchar(l)
             is_comment = startsWith(l, "#")
+        }
+        # Filter out empty strings and check if we have valid content
+        txt = txt[nzchar(txt)]
+        if (length(txt) < 2) {
+            # Need at least header + 1 data row
+            return(data.table::data.table(pair = pair))
         }
         tbl = setDT(read.table(text = txt, header = TRUE, sep = "\t"))
         extract_metrics(qc_data = tbl, metrics = cols, pair = pair)
@@ -886,7 +893,7 @@ add_variant_counts <- function(
 #' @param jabba_gg Path to JaBbA graph RDS file
 #' @return Updated metadata with SV counts
 add_sv_counts <- function(metadata, jabba_gg = NULL) {
-    if (is.null(jabba_gg)) {
+    if (is.null(jabba_gg) || (is.character(jabba_gg) && !file.exists(jabba_gg))) {
         return(metadata)
     }
     
@@ -1160,7 +1167,7 @@ add_coverage_parameters <- function(metadata, tumor_coverage, field = "foregroun
 #' @param het_pileups_wgs Path to heterozygous pileups WGS data
 #' @return Updated metadata with heterozygous pileups parameters
 add_het_pileups_parameters <- function(metadata, het_pileups) {
-    if (!is.null(het_pileups)) {
+    if (!is.null(het_pileups) && file.exists(het_pileups)) {
         hets.read <- grab.hets(het_pileups) %>% gr2dt()
         hets.read <- dt2gr(hets.read[, .(count = sum(count)), by = c("seqnames", "start", "end")])
         if (is.null(metadata$purity) || is.null(metadata$ploidy)) {
@@ -1249,7 +1256,8 @@ compute_signature_averages <- function(
     } else {
         sig.dt <- fread(sig_file)
         if (nrow(sig.dt) == 0) {
-            stop("No signatures found in file")
+            warning("No signatures found in file: ", sig_file)
+            return(NULL)
         }
         pair <- sig.dt$Samples[1]
         sig.dt[, pair := pair]

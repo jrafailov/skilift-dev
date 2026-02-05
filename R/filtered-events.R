@@ -734,7 +734,7 @@ get_gene_copy_numbers <- function(
 #' amplifications and deletions
 #'
 #' @param jab character path to jabba file or gGraph object
-get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0.5, nseg = NULL, min_cn_quantile_threshold = 0.1, max_cn_quantile_threshold = 0.9) {
+get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0.5, nseg = NULL, min_cn_quantile_threshold = 0.1, max_cn_quantile_threshold = 0.9, gencode = NULL) {
   gg <- jab
   if (!inherits(gg, "gGraph")) {
     gg <- gG(jabba = jab)
@@ -747,7 +747,12 @@ get_gene_ampdels_from_jabba <- function(jab, pge, amp.thresh = 4, del.thresh = 0
     max_cn_quantile_threshold = max_cn_quantile_threshold
   )
   gene_CN[, `:=`(type, NA_character_)]
-  gencode = dynGet("gencode", inherits = TRUE, minframe = 0L) ## FIXME: kind of dangerous to get the variable from a parent environment.
+  if (is.null(gencode)) {
+    gencode = dynGet("gencode", inherits = TRUE, minframe = 0L)
+  }
+  if (is.character(gencode)) {
+    stop("gencode must be a GRanges object, not a file path. Pass the processed gencode explicitly.")
+  }
   exons_merged = GenomicRanges::reduce(gUtils::gr_construct_by(gencode[gencode$type == "exon"], by = "gene_name"))
   ## exons_merged = gUtils::gr_deconstruct_by(exons_merged, meta = TRUE, "gene_name")
   exons_merged$exon_width = width(exons_merged)
@@ -823,7 +828,8 @@ collect_copy_number_jabba <- function(
     verbose = TRUE,
     karyograph = NULL,
 	min_cn_quantile_threshold = 0.1,
-	max_cn_quantile_threshold = 0.9) {
+	max_cn_quantile_threshold = 0.9,
+	gencode = NULL) {
   if (is.null(jabba_rds) || !file.exists(jabba_rds)) {
     if (verbose) message("Jabba RDS file is missing or does not exist.")
     return(data.table(type = NA, source = "jabba_rds"))
@@ -859,7 +865,8 @@ collect_copy_number_jabba <- function(
     pge = pge,
     nseg = nseg,
 	min_cn_quantile_threshold = min_cn_quantile_threshold,
-	max_cn_quantile_threshold = max_cn_quantile_threshold
+	max_cn_quantile_threshold = max_cn_quantile_threshold,
+	gencode = gencode
   )
 
   if (nrow(scna)) {
@@ -979,7 +986,7 @@ collect_gene_mutations <- function(
 #' @param oncokb_cna Path to the oncokb CNA file.
 #' @param verbose Logical flag to indicate if messages should be printed.
 #' @return A data.table containing processed OncoKB CNA information.
-collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh, karyograph = NULL, verbose = TRUE, min_cn_quantile_threshold = 0.1, max_cn_quantile_threshold = 0.9) {
+collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh, karyograph = NULL, verbose = TRUE, min_cn_quantile_threshold = 0.1, max_cn_quantile_threshold = 0.9, gencode = NULL) {
   if (is.null(oncokb_cna) || !file.exists(oncokb_cna)) {
     if (verbose) message("OncoKB CNA file is missing or does not exist.")
     return(data.table(type = NA, source = "oncokb_cna"))
@@ -999,7 +1006,8 @@ collect_oncokb_cna <- function(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh
       pge = pge,
       nseg = nseg,
 	  min_cn_quantile_threshold = 0.1, 
-	  max_cn_quantile_threshold = 0.9
+	  max_cn_quantile_threshold = 0.9,
+	  gencode = gencode
   ) 
 
   matches = list(
@@ -1941,14 +1949,14 @@ oncotable <- function(
   if (!is.na(oncokb_cna) && !is.null(oncokb_cna) && file.exists(oncokb_cna)) {
     out <- rbind(
       out,
-      collect_oncokb_cna(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh, karyograph, verbose),
+      collect_oncokb_cna(oncokb_cna, jabba_gg, pge, amp.thresh, del.thresh, karyograph, verbose, gencode = gencode),
       fill = TRUE,
       use.names = TRUE
     )
   } else {
     out <- rbind(
       out,
-      collect_copy_number_jabba(jabba_gg, pge, amp.thresh, del.thresh, verbose, karyograph),
+      collect_copy_number_jabba(jabba_gg, pge, amp.thresh, del.thresh, verbose, karyograph, gencode = gencode),
       fill = TRUE,
       use.names = TRUE
     )
